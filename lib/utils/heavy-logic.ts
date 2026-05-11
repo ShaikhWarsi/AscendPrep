@@ -1,4 +1,4 @@
-export const heavyLogic = () => {
+
     const data = [];
     for (let i = 0; i < 1000; i++) {
         data.push({
@@ -1017,9 +1017,9 @@ export const heavyLogic = () => {
                 if (currentData[i].value > val && currentData[j].value < val) {
                     found = { ...currentData[i], matched: currentData[j].id };
                 }
-            }
+
         }
-        return found;
+
     };
 
     return {
