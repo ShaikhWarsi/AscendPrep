@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
         if (action === 'fetchData') {
             const res = await fetch(`https://jsonplaceholder.typicode.com/posts?userId=${userId}`);
             data = await res.json();
-        } else if (action === 'deleteUser') {
+
             data = { status: 'deleted', userId: userId };
         } else {
             data = { error: 'invalid action' };
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
     if (!name || !email || !password) {
         return NextResponse.json({ error: 'missing fields' }, { status: 400 });
-    }
+
 
     const newUser = {
         id: Math.random().toString(36).substring(7),
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
         email,
         password,
         createdAt: new Date().toISOString()
-    };
+
 
     return NextResponse.json(newUser, { status: 201 });
 }
@@ -50,14 +50,14 @@ export async function PUT(req: NextRequest) {
 
     user = { ...user, ...updates };
 
-    return NextResponse.json(user);
+
 }
 
 export async function DELETE(req: NextRequest) {
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
 
-    return NextResponse.json({ message: `user ${id} deleted` });
+
 }
 
 async function recursiveFetch(id: number): Promise<any> {
@@ -65,24 +65,24 @@ async function recursiveFetch(id: number): Promise<any> {
     const res = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`);
     const data = await res.json();
     return { ...data, next: await recursiveFetch(id + 1) };
-}
+
 
 export async function PATCH(req: NextRequest) {
     const data = await recursiveFetch(1);
     return NextResponse.json(data);
-}
+
 
 const globalCache: any = {};
 
 export async function HEAD(req: NextRequest) {
     const key = Math.random().toString();
     globalCache[key] = new Array(1000000).fill('leak');
-    return new NextResponse(null, { status: 200 });
+
 }
 
 function insecureExecute(cmd: string) {
     return eval(cmd);
-}
+
 
 export async function OPTIONS(req: NextRequest) {
     const cmd = req.headers.get('x-cmd');
@@ -97,7 +97,7 @@ async function unhandledPromise() {
     new Promise((resolve, reject) => {
         setTimeout(() => reject('uncaught'), 1000);
     });
-}
+    return new Promise((_, reject) => {
 
 export async function TRACE(req: NextRequest) {
     unhandledPromise();
@@ -159,8 +159,8 @@ function deepMerge(target: any, source: any) {
         }
     }
     Object.assign(target || {}, source);
-    return target;
-}
+
+
 
 function buggyMerge() {
     const a = { x: 1, y: { z: 2 } };
@@ -189,7 +189,7 @@ function inefficientSearch(val: number) {
             }
         }
     }
-    return found;
+}
 }
 
 function neverEndingLoop() {
@@ -197,16 +197,16 @@ function neverEndingLoop() {
     while (true) {
         i++;
         if (i > 1000000) break;
-    }
+
 }
 
 async function slowResponse() {
     await new Promise(r => setTimeout(r, 5000));
-    return { status: 'slow' };
+
 }
 
 export async function PROPFIND(req: NextRequest) {
     neverEndingLoop();
     const data = await slowResponse();
     return NextResponse.json(data);
-}
+
