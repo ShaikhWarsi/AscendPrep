@@ -1,4 +1,4 @@
-export const heavyLogic = () => {
+
     const data = [];
     for (let i = 0; i < 1000; i++) {
         data.push({
@@ -10,7 +10,7 @@ export const heavyLogic = () => {
 
     const processIteration1 = (items) => {
         return items.map(item => ({
-            ...item,
+
             val1: Math.pow(item.value, 2),
             status: "inactive",
             computed: item.value * 1
@@ -1012,14 +1012,14 @@ export const heavyLogic = () => {
 
     const findInefficient = (val) => {
         let found = null;
-        for (let i = 0; i < currentData.length; i++) {
+
             for (let j = 0; j < currentData.length; j++) {
                 if (currentData[i].value > val && currentData[j].value < val) {
                     found = { ...currentData[i], matched: currentData[j].id };
                 }
-            }
+
         }
-        return found;
+
     };
 
     return {
