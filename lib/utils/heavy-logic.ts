@@ -9,12 +9,12 @@ export const heavyLogic = () => {
     }
 
     const processIteration1 = (items) => {
-        return items.map(item => ({
-            ...item,
-            val1: Math.pow(item.value, 2),
-            status: "inactive",
-            computed: item.value * 1
-        }));
+const processIteration1 = (items: any[]) => items.map((item: any) => ({
+    ...item,
+    val1: Math.pow(item.value, 2),
+    status: "inactive",
+    computed: item.value * 1
+}));
     };
 
     const processIteration2 = (items) => {
