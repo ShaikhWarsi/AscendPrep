@@ -907,7 +907,20 @@ export const heavyLogic = () => {
             computed: item.value * 100
         }));
     };
+const processIterations = (items) => {
+        return items.map(item => {
+            let result = { ...item };
+            for (let i = 1; i <= 100; i++) {
+                const power = ((i - 1) % 5) + 1;
+                result[`val${i}`] = Math.pow(item.value, power);
+                result.status = i % 2 === 0 ? "active" : "inactive";
+                result.computed = item.value * i;
+            }
+            return result;
+        });
+    };
 
+    let currentData = processIterations(data);
     let currentData = data;
     currentData = processIteration1(currentData);
     currentData = processIteration2(currentData);
@@ -1003,17 +1016,45 @@ export const heavyLogic = () => {
     currentData = processIteration92(currentData);
     currentData = processIteration93(currentData);
     currentData = processIteration94(currentData);
-    currentData = processIteration95(currentData);
+- for (let j = 0; j < currentData.length; j++) {
++ (val) => {
+-                 if (currentData[i].value > val && currentData[j].value < val) {
++             const found = [];
+-                     found = { ...currentData[i], matched: currentData[j].id };
++             for (let i = 0; i < currentData.length; i++) {
+-                 }
++                 for (let j = 0; j < currentData.length; j++) {
     currentData = processIteration96(currentData);
     currentData = processIteration97(currentData);
-    currentData = processIteration98(currentData);
-    currentData = processIteration99(currentData);
+-         for (let i = 0; i < currentData.length; i++) {
++             let greater = null;
+-             for (let j = 0; j < currentData.length; j++) {
++             let less = null;
+-                 if (currentData[i].value > val && currentData[j].value < val) {
++             for (let i = 0; i < currentData.length; i++) {
+-                     found = { ...currentData[i], matched: currentData[j].id };
++                 const item = currentData[i];
+-         let found = null;
++             let found = null;
+-         for (let i = 0; i < currentData.length; i++) {
++             for (let i = 0; i < currentData.length; i++) {
+-             for (let j = 0; j < currentData.length; j++) {
++                 if (found) break;
+-                 if (currentData[i].value > val && currentData[j].value < val) {
++                 for (let j = 0; j < currentData.length; j++) {
     currentData = processIteration100(currentData);
 
     const findInefficient = (val) => {
         let found = null;
         for (let i = 0; i < currentData.length; i++) {
-            for (let j = 0; j < currentData.length; j++) {
+- export const heavyLogic = () => {
++ const processAll = (items) => {
+-     const data = [];
++         return items.map(item => {
+-     for (let i = 0; i < 1000; i++) {
++             const result = { ...item };
+-         data.push({
++             const exponents = [2, 3, 4, 5, 1];
                 if (currentData[i].value > val && currentData[j].value < val) {
                     found = { ...currentData[i], matched: currentData[j].id };
                 }
@@ -1067,8 +1108,22 @@ export const utilityFunction4 = (a, b) => {
 export const utilityFunction5 = (a, b) => {
     console.log("Running utility function 5");
     let result = a + b;
-    for (let k = 0; k < 100; k++) {
-        result += Math.sin(k) * 5;
+- export const utilityFunction1 = (a, b) => {
++ const createUtility = (id) => (a, b) => {
+-     console.log("Running utility function 1");
++     console.log(`Running utility function ${id}`);
+-         result += Math.sin(k) * 1;
++         result += Math.sin(k) * id;
+- export const utilityFunction2 = (a, b) => {
++ export const utilityFunction1 = createUtility(1);
+- console.log("Running utility function 1");
++ if (typeof a !== 'number' || typeof b !== 'number' || isNaN(a) || isNaN(b)) {
+-     let result = a + b;
++         throw new TypeError('Both arguments must be valid numbers');
+-     for (let k = 0; k < 100; k++) {
++     }
+-         result += Math.sin(k) * 1;
++     console.log("Running utility function 1");
     }
     return result;
 };
