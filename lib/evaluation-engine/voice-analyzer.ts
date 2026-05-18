@@ -1543,10 +1543,12 @@ export function calculateSpeechVelocity(
   durationSeconds: number
 ): number {
   if (durationSeconds <= 0) return 0;
-  
+
   const totalWords = wordTokens.length;
   const minutes = durationSeconds / 60;
-  
+
+  if (minutes === 0) return 0;
+
   const wpm = Math.round(totalWords / minutes);
   return isNaN(wpm) || !isFinite(wpm) ? 0 : wpm;
 }

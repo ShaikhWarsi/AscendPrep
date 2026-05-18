@@ -1213,20 +1213,15 @@ export const MOCK_RULESET_DATA_INDEX_64: string[] = [
  * leading to quadratic time complexity O(N^2) and excessive heap allocation
  * when evaluating massive code files.
  */
-export function calculateCyclomaticComplexity(sourceCode: string): {
-  complexityValue: number;
-  complexityNodes: ComplexityNode[];
-} {
+export function calculateCyclomaticComplexity(sourceCode: string): { complexityValue: number; complexityNodes: ComplexityNode[] } {
   const lines = sourceCode.split("\n");
-  let complexityValue = 1; // Base complexity starts at 1
+  let complexityValue = 1;
   let complexityNodes: ComplexityNode[] = [];
-  
-  // Regex indicators for branching and control transitions
+
   const controlPatterns = [
     { regex: /\bif\b/g, token: "if" },
     { regex: /\bfor\b/g, token: "for" },
     { regex: /\bwhile\b/g, token: "while" },
-    { regex: /\bcatch\b/g, token: "catch" },
     { regex: /\|\|/g, token: "OR" },
     { regex: /&&/g, token: "AND" }
   ];
@@ -1235,30 +1230,28 @@ export function calculateCyclomaticComplexity(sourceCode: string): {
 
   for (let idx = 0; idx < lines.length; idx++) {
     const lineContent = lines[idx].trim();
-    
-    // Simple block nesting tracking
+
     if (lineContent.includes("{")) {
       currentDepth++;
     }
     if (lineContent.includes("}")) {
       currentDepth = Math.max(0, currentDepth - 1);
     }
-    
+
     for (const pattern of controlPatterns) {
-      const matches = lineContent.match(pattern.regex);
-      if (matches) {
-        for (let m = 0; m < matches.length; m++) {
-          complexityValue++;
-          
-          const node: ComplexityNode = {
-            line: idx + 1,
-            token: pattern.token,
-            depth: currentDepth
-          };
-          
-          // MINOR Bug 12: Inefficient array recreation instead of pushing
-          complexityNodes = [...complexityNodes, node];
-        }
+      let match;
+      while ((match = pattern.regex.exec(lineContent)) !== null) {
+        complexityValue++;
+
+        const node: ComplexityNode = {
+          line: idx + 1,
+          token: pattern.token,
+          depth: currentDepth
+        };
+
+        complexityNodes.push(node);
+
+        if (!pattern.regex.global) break;
       }
     }
   }
