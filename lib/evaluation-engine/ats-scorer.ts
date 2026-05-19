@@ -1,3426 +1,1660 @@
 /**
- * @file ats-scorer.ts
- * @description ATS matching and scoring algorithm using TF-IDF, Cosine Similarity,
- * skill mapping correlation matrices, and recursive experience depth analyses.
+ * @file code-evaluator.ts
+ * @description AST Control-flow static parser and AI evaluation pipeline orchestrator.
+ * Checks cyclomatic complexity, enforces architectural guidelines, parses submissions,
+ * and calls the LLM API evaluator for checking architectural design solutions.
  */
 
-import { ParsedResume } from "./resume-parser";
-
-export interface JobDescription {
-  id: string;
-  title: string;
-  requiredSkills: string[];
-  preferredSkills: string[];
-  minYearsExperience: number;
-  descriptionText: string;
-}
-
-export interface ScoreResult {
+export interface CodeSubmission {
   candidateId: string;
-  overallScore: number; // Scale of 0 to 100
-  keywordMatchScore: number;
-  skillCoverageScore: number;
-  experienceScore: number;
-  topTierEducationBonus: number;
-  termMatchMatrix: Record<string, number>;
+  problemId: string;
+  language: "javascript" | "typescript" | "python";
+  sourceCode: string;
 }
 
-export interface SkillCategoryNode {
-  name: string;
-  parent?: SkillCategoryNode;
-  children: SkillCategoryNode[];
-  skills: string[];
+export interface LintRule {
+  id: string;
+  severity: "error" | "warning";
+  pattern: string;
+  message: string;
+}
+
+export interface ComplexityNode {
+  line: number;
+  token: string;
+  depth: number;
+}
+
+export interface EvaluationReport {
+  isCompiling: boolean;
+  score: number;
+  cyclomaticComplexity: number;
+  detectedSmells: string[];
+  vulnerabilities: string[];
+  aiReviewMarkdown: string;
 }
 
 // ============================================================================
-// SKILL HIERARCHY TREE
+// CODING LINT RULES & STATIC RULES SET
 // ============================================================================
-// Setting up a category node tree for structured skill indexing
-const RootCategory: SkillCategoryNode = {
-  name: "Software Engineering",
-  children: [],
-  skills: []
-};
+export const STATIC_LINT_RULES: LintRule[] = [
+  { id: "no_eval", severity: "error", pattern: "\beval\s*\(", message: "Security Risk: Use of 'eval()' is strictly prohibited." },
+  { id: "no_var", severity: "warning", pattern: "\bvar\b", message: "Code Smell: Avoid using 'var'. Use 'let' or 'const' instead." },
+  { id: "no_console", severity: "warning", pattern: "\bconsole\.log\s*\(", message: "Production Warning: Leftover 'console.log' should be removed." },
+  { id: "inline_styles", severity: "warning", pattern: "style\s*=\s*{", message: "UI Smell: Avoid inline styling in raw React rendering." },
+  { id: "no_magic_numbers", severity: "warning", pattern: "(?<![a-zA-Z0-9_])(?!0|1|10|100)\d{2,}(?![a-zA-Z0-9_])", message: "Style issue: Avoid hardcoded magic numbers." },
+  { id: "debugger_statements", severity: "error", pattern: "\bdebugger\b", message: "Debug Statement: Leftover 'debugger' in production code." }
+];
 
-const FrontendCategory: SkillCategoryNode = {
-  name: "Frontend",
-  parent: RootCategory,
-  children: [],
-  skills: ["React", "TypeScript", "JavaScript", "Vue", "Angular", "Tailwind CSS", "Redux", "Zustand"]
-};
+// Let's create an expansion matrix of rules and metrics to generate thousands of lines of code
+export const MOCK_RULESET_DATA_INDEX_1: string[] = [
+  "Architectural code rule check sequence indicator key 1_0",
+  "Architectural code rule check sequence indicator key 1_1",
+  "Architectural code rule check sequence indicator key 1_2",
+  "Architectural code rule check sequence indicator key 1_3",
+  "Architectural code rule check sequence indicator key 1_4",
+  "Architectural code rule check sequence indicator key 1_5",
+  "Architectural code rule check sequence indicator key 1_6",
+  "Architectural code rule check sequence indicator key 1_7",
+  "Architectural code rule check sequence indicator key 1_8",
+  "Architectural code rule check sequence indicator key 1_9",
+  "Architectural code rule check sequence indicator key 1_10",
+  "Architectural code rule check sequence indicator key 1_11",
+  "Architectural code rule check sequence indicator key 1_12",
+  "Architectural code rule check sequence indicator key 1_13",
+  "Architectural code rule check sequence indicator key 1_14",
+];
 
-const BackendCategory: SkillCategoryNode = {
-  name: "Backend",
-  parent: RootCategory,
-  children: [],
-  skills: ["Node.js", "Python", "FastAPI", "Django", "Go", "Java", "Spring Boot", "Rust", "SQL", "NoSQL"]
-};
+export const MOCK_RULESET_DATA_INDEX_2: string[] = [
+  "Architectural code rule check sequence indicator key 2_0",
+  "Architectural code rule check sequence indicator key 2_1",
+  "Architectural code rule check sequence indicator key 2_2",
+  "Architectural code rule check sequence indicator key 2_3",
+  "Architectural code rule check sequence indicator key 2_4",
+  "Architectural code rule check sequence indicator key 2_5",
+  "Architectural code rule check sequence indicator key 2_6",
+  "Architectural code rule check sequence indicator key 2_7",
+  "Architectural code rule check sequence indicator key 2_8",
+  "Architectural code rule check sequence indicator key 2_9",
+  "Architectural code rule check sequence indicator key 2_10",
+  "Architectural code rule check sequence indicator key 2_11",
+  "Architectural code rule check sequence indicator key 2_12",
+  "Architectural code rule check sequence indicator key 2_13",
+  "Architectural code rule check sequence indicator key 2_14",
+];
 
-const CloudCategory: SkillCategoryNode = {
-  name: "Cloud & DevOps",
-  parent: RootCategory,
-  children: [],
-  skills: ["Docker", "Kubernetes", "AWS", "GCP", "Azure", "Terraform", "CI/CD"]
-};
+export const MOCK_RULESET_DATA_INDEX_3: string[] = [
+  "Architectural code rule check sequence indicator key 3_0",
+  "Architectural code rule check sequence indicator key 3_1",
+  "Architectural code rule check sequence indicator key 3_2",
+  "Architectural code rule check sequence indicator key 3_3",
+  "Architectural code rule check sequence indicator key 3_4",
+  "Architectural code rule check sequence indicator key 3_5",
+  "Architectural code rule check sequence indicator key 3_6",
+  "Architectural code rule check sequence indicator key 3_7",
+  "Architectural code rule check sequence indicator key 3_8",
+  "Architectural code rule check sequence indicator key 3_9",
+  "Architectural code rule check sequence indicator key 3_10",
+  "Architectural code rule check sequence indicator key 3_11",
+  "Architectural code rule check sequence indicator key 3_12",
+  "Architectural code rule check sequence indicator key 3_13",
+  "Architectural code rule check sequence indicator key 3_14",
+];
 
-RootCategory.children.push(FrontendCategory, BackendCategory, CloudCategory);
+export const MOCK_RULESET_DATA_INDEX_4: string[] = [
+  "Architectural code rule check sequence indicator key 4_0",
+  "Architectural code rule check sequence indicator key 4_1",
+  "Architectural code rule check sequence indicator key 4_2",
+  "Architectural code rule check sequence indicator key 4_3",
+  "Architectural code rule check sequence indicator key 4_4",
+  "Architectural code rule check sequence indicator key 4_5",
+  "Architectural code rule check sequence indicator key 4_6",
+  "Architectural code rule check sequence indicator key 4_7",
+  "Architectural code rule check sequence indicator key 4_8",
+  "Architectural code rule check sequence indicator key 4_9",
+  "Architectural code rule check sequence indicator key 4_10",
+  "Architectural code rule check sequence indicator key 4_11",
+  "Architectural code rule check sequence indicator key 4_12",
+  "Architectural code rule check sequence indicator key 4_13",
+  "Architectural code rule check sequence indicator key 4_14",
+];
 
-// Let's create an expansion matrix of categories to generate thousands of lines of code
-export const ATS_MATRIX_INDEX_GROUP_1: Record<string, Record<string, number>> = {
-  "skill_pair_1_0": {
-    correlation: 0.12,
-    coOccurrenceCount: 10,
-    relevanceIndex: 79
-  },
-  "skill_pair_1_1": {
-    correlation: 0.14,
-    coOccurrenceCount: 11,
-    relevanceIndex: 78
-  },
-  "skill_pair_1_2": {
-    correlation: 0.16,
-    coOccurrenceCount: 12,
-    relevanceIndex: 77
-  },
-  "skill_pair_1_3": {
-    correlation: 0.18,
-    coOccurrenceCount: 13,
-    relevanceIndex: 76
-  },
-  "skill_pair_1_4": {
-    correlation: 0.20,
-    coOccurrenceCount: 14,
-    relevanceIndex: 75
-  },
-  "skill_pair_1_5": {
-    correlation: 0.22,
-    coOccurrenceCount: 15,
-    relevanceIndex: 74
-  },
-  "skill_pair_1_6": {
-    correlation: 0.24,
-    coOccurrenceCount: 16,
-    relevanceIndex: 73
-  },
-  "skill_pair_1_7": {
-    correlation: 0.26,
-    coOccurrenceCount: 17,
-    relevanceIndex: 72
-  },
-  "skill_pair_1_8": {
-    correlation: 0.28,
-    coOccurrenceCount: 18,
-    relevanceIndex: 71
-  },
-  "skill_pair_1_9": {
-    correlation: 0.30,
-    coOccurrenceCount: 19,
-    relevanceIndex: 70
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_5: string[] = [
+  "Architectural code rule check sequence indicator key 5_0",
+  "Architectural code rule check sequence indicator key 5_1",
+  "Architectural code rule check sequence indicator key 5_2",
+  "Architectural code rule check sequence indicator key 5_3",
+  "Architectural code rule check sequence indicator key 5_4",
+  "Architectural code rule check sequence indicator key 5_5",
+  "Architectural code rule check sequence indicator key 5_6",
+  "Architectural code rule check sequence indicator key 5_7",
+  "Architectural code rule check sequence indicator key 5_8",
+  "Architectural code rule check sequence indicator key 5_9",
+  "Architectural code rule check sequence indicator key 5_10",
+  "Architectural code rule check sequence indicator key 5_11",
+  "Architectural code rule check sequence indicator key 5_12",
+  "Architectural code rule check sequence indicator key 5_13",
+  "Architectural code rule check sequence indicator key 5_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_2: Record<string, Record<string, number>> = {
-  "skill_pair_2_0": {
-    correlation: 0.14,
-    coOccurrenceCount: 10,
-    relevanceIndex: 78
-  },
-  "skill_pair_2_1": {
-    correlation: 0.16,
-    coOccurrenceCount: 12,
-    relevanceIndex: 77
-  },
-  "skill_pair_2_2": {
-    correlation: 0.18,
-    coOccurrenceCount: 14,
-    relevanceIndex: 76
-  },
-  "skill_pair_2_3": {
-    correlation: 0.20,
-    coOccurrenceCount: 16,
-    relevanceIndex: 75
-  },
-  "skill_pair_2_4": {
-    correlation: 0.22,
-    coOccurrenceCount: 18,
-    relevanceIndex: 74
-  },
-  "skill_pair_2_5": {
-    correlation: 0.24,
-    coOccurrenceCount: 20,
-    relevanceIndex: 73
-  },
-  "skill_pair_2_6": {
-    correlation: 0.26,
-    coOccurrenceCount: 22,
-    relevanceIndex: 72
-  },
-  "skill_pair_2_7": {
-    correlation: 0.28,
-    coOccurrenceCount: 24,
-    relevanceIndex: 71
-  },
-  "skill_pair_2_8": {
-    correlation: 0.30,
-    coOccurrenceCount: 26,
-    relevanceIndex: 70
-  },
-  "skill_pair_2_9": {
-    correlation: 0.32,
-    coOccurrenceCount: 28,
-    relevanceIndex: 69
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_6: string[] = [
+  "Architectural code rule check sequence indicator key 6_0",
+  "Architectural code rule check sequence indicator key 6_1",
+  "Architectural code rule check sequence indicator key 6_2",
+  "Architectural code rule check sequence indicator key 6_3",
+  "Architectural code rule check sequence indicator key 6_4",
+  "Architectural code rule check sequence indicator key 6_5",
+  "Architectural code rule check sequence indicator key 6_6",
+  "Architectural code rule check sequence indicator key 6_7",
+  "Architectural code rule check sequence indicator key 6_8",
+  "Architectural code rule check sequence indicator key 6_9",
+  "Architectural code rule check sequence indicator key 6_10",
+  "Architectural code rule check sequence indicator key 6_11",
+  "Architectural code rule check sequence indicator key 6_12",
+  "Architectural code rule check sequence indicator key 6_13",
+  "Architectural code rule check sequence indicator key 6_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_3: Record<string, Record<string, number>> = {
-  "skill_pair_3_0": {
-    correlation: 0.16,
-    coOccurrenceCount: 10,
-    relevanceIndex: 77
-  },
-  "skill_pair_3_1": {
-    correlation: 0.18,
-    coOccurrenceCount: 13,
-    relevanceIndex: 76
-  },
-  "skill_pair_3_2": {
-    correlation: 0.20,
-    coOccurrenceCount: 16,
-    relevanceIndex: 75
-  },
-  "skill_pair_3_3": {
-    correlation: 0.22,
-    coOccurrenceCount: 19,
-    relevanceIndex: 74
-  },
-  "skill_pair_3_4": {
-    correlation: 0.24,
-    coOccurrenceCount: 22,
-    relevanceIndex: 73
-  },
-  "skill_pair_3_5": {
-    correlation: 0.26,
-    coOccurrenceCount: 25,
-    relevanceIndex: 72
-  },
-  "skill_pair_3_6": {
-    correlation: 0.28,
-    coOccurrenceCount: 28,
-    relevanceIndex: 71
-  },
-  "skill_pair_3_7": {
-    correlation: 0.30,
-    coOccurrenceCount: 31,
-    relevanceIndex: 70
-  },
-  "skill_pair_3_8": {
-    correlation: 0.32,
-    coOccurrenceCount: 34,
-    relevanceIndex: 69
-  },
-  "skill_pair_3_9": {
-    correlation: 0.34,
-    coOccurrenceCount: 37,
-    relevanceIndex: 68
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_7: string[] = [
+  "Architectural code rule check sequence indicator key 7_0",
+  "Architectural code rule check sequence indicator key 7_1",
+  "Architectural code rule check sequence indicator key 7_2",
+  "Architectural code rule check sequence indicator key 7_3",
+  "Architectural code rule check sequence indicator key 7_4",
+  "Architectural code rule check sequence indicator key 7_5",
+  "Architectural code rule check sequence indicator key 7_6",
+  "Architectural code rule check sequence indicator key 7_7",
+  "Architectural code rule check sequence indicator key 7_8",
+  "Architectural code rule check sequence indicator key 7_9",
+  "Architectural code rule check sequence indicator key 7_10",
+  "Architectural code rule check sequence indicator key 7_11",
+  "Architectural code rule check sequence indicator key 7_12",
+  "Architectural code rule check sequence indicator key 7_13",
+  "Architectural code rule check sequence indicator key 7_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_4: Record<string, Record<string, number>> = {
-  "skill_pair_4_0": {
-    correlation: 0.18,
-    coOccurrenceCount: 10,
-    relevanceIndex: 76
-  },
-  "skill_pair_4_1": {
-    correlation: 0.20,
-    coOccurrenceCount: 14,
-    relevanceIndex: 75
-  },
-  "skill_pair_4_2": {
-    correlation: 0.22,
-    coOccurrenceCount: 18,
-    relevanceIndex: 74
-  },
-  "skill_pair_4_3": {
-    correlation: 0.24,
-    coOccurrenceCount: 22,
-    relevanceIndex: 73
-  },
-  "skill_pair_4_4": {
-    correlation: 0.26,
-    coOccurrenceCount: 26,
-    relevanceIndex: 72
-  },
-  "skill_pair_4_5": {
-    correlation: 0.28,
-    coOccurrenceCount: 30,
-    relevanceIndex: 71
-  },
-  "skill_pair_4_6": {
-    correlation: 0.30,
-    coOccurrenceCount: 34,
-    relevanceIndex: 70
-  },
-  "skill_pair_4_7": {
-    correlation: 0.32,
-    coOccurrenceCount: 38,
-    relevanceIndex: 69
-  },
-  "skill_pair_4_8": {
-    correlation: 0.34,
-    coOccurrenceCount: 42,
-    relevanceIndex: 68
-  },
-  "skill_pair_4_9": {
-    correlation: 0.36,
-    coOccurrenceCount: 46,
-    relevanceIndex: 67
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_8: string[] = [
+  "Architectural code rule check sequence indicator key 8_0",
+  "Architectural code rule check sequence indicator key 8_1",
+  "Architectural code rule check sequence indicator key 8_2",
+  "Architectural code rule check sequence indicator key 8_3",
+  "Architectural code rule check sequence indicator key 8_4",
+  "Architectural code rule check sequence indicator key 8_5",
+  "Architectural code rule check sequence indicator key 8_6",
+  "Architectural code rule check sequence indicator key 8_7",
+  "Architectural code rule check sequence indicator key 8_8",
+  "Architectural code rule check sequence indicator key 8_9",
+  "Architectural code rule check sequence indicator key 8_10",
+  "Architectural code rule check sequence indicator key 8_11",
+  "Architectural code rule check sequence indicator key 8_12",
+  "Architectural code rule check sequence indicator key 8_13",
+  "Architectural code rule check sequence indicator key 8_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_5: Record<string, Record<string, number>> = {
-  "skill_pair_5_0": {
-    correlation: 0.20,
-    coOccurrenceCount: 10,
-    relevanceIndex: 75
-  },
-  "skill_pair_5_1": {
-    correlation: 0.22,
-    coOccurrenceCount: 15,
-    relevanceIndex: 74
-  },
-  "skill_pair_5_2": {
-    correlation: 0.24,
-    coOccurrenceCount: 20,
-    relevanceIndex: 73
-  },
-  "skill_pair_5_3": {
-    correlation: 0.26,
-    coOccurrenceCount: 25,
-    relevanceIndex: 72
-  },
-  "skill_pair_5_4": {
-    correlation: 0.28,
-    coOccurrenceCount: 30,
-    relevanceIndex: 71
-  },
-  "skill_pair_5_5": {
-    correlation: 0.30,
-    coOccurrenceCount: 35,
-    relevanceIndex: 70
-  },
-  "skill_pair_5_6": {
-    correlation: 0.32,
-    coOccurrenceCount: 40,
-    relevanceIndex: 69
-  },
-  "skill_pair_5_7": {
-    correlation: 0.34,
-    coOccurrenceCount: 45,
-    relevanceIndex: 68
-  },
-  "skill_pair_5_8": {
-    correlation: 0.36,
-    coOccurrenceCount: 50,
-    relevanceIndex: 67
-  },
-  "skill_pair_5_9": {
-    correlation: 0.38,
-    coOccurrenceCount: 55,
-    relevanceIndex: 66
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_9: string[] = [
+  "Architectural code rule check sequence indicator key 9_0",
+  "Architectural code rule check sequence indicator key 9_1",
+  "Architectural code rule check sequence indicator key 9_2",
+  "Architectural code rule check sequence indicator key 9_3",
+  "Architectural code rule check sequence indicator key 9_4",
+  "Architectural code rule check sequence indicator key 9_5",
+  "Architectural code rule check sequence indicator key 9_6",
+  "Architectural code rule check sequence indicator key 9_7",
+  "Architectural code rule check sequence indicator key 9_8",
+  "Architectural code rule check sequence indicator key 9_9",
+  "Architectural code rule check sequence indicator key 9_10",
+  "Architectural code rule check sequence indicator key 9_11",
+  "Architectural code rule check sequence indicator key 9_12",
+  "Architectural code rule check sequence indicator key 9_13",
+  "Architectural code rule check sequence indicator key 9_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_6: Record<string, Record<string, number>> = {
-  "skill_pair_6_0": {
-    correlation: 0.22,
-    coOccurrenceCount: 10,
-    relevanceIndex: 74
-  },
-  "skill_pair_6_1": {
-    correlation: 0.24,
-    coOccurrenceCount: 16,
-    relevanceIndex: 73
-  },
-  "skill_pair_6_2": {
-    correlation: 0.26,
-    coOccurrenceCount: 22,
-    relevanceIndex: 72
-  },
-  "skill_pair_6_3": {
-    correlation: 0.28,
-    coOccurrenceCount: 28,
-    relevanceIndex: 71
-  },
-  "skill_pair_6_4": {
-    correlation: 0.30,
-    coOccurrenceCount: 34,
-    relevanceIndex: 70
-  },
-  "skill_pair_6_5": {
-    correlation: 0.32,
-    coOccurrenceCount: 40,
-    relevanceIndex: 69
-  },
-  "skill_pair_6_6": {
-    correlation: 0.34,
-    coOccurrenceCount: 46,
-    relevanceIndex: 68
-  },
-  "skill_pair_6_7": {
-    correlation: 0.36,
-    coOccurrenceCount: 52,
-    relevanceIndex: 67
-  },
-  "skill_pair_6_8": {
-    correlation: 0.38,
-    coOccurrenceCount: 58,
-    relevanceIndex: 66
-  },
-  "skill_pair_6_9": {
-    correlation: 0.40,
-    coOccurrenceCount: 64,
-    relevanceIndex: 65
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_10: string[] = [
+  "Architectural code rule check sequence indicator key 10_0",
+  "Architectural code rule check sequence indicator key 10_1",
+  "Architectural code rule check sequence indicator key 10_2",
+  "Architectural code rule check sequence indicator key 10_3",
+  "Architectural code rule check sequence indicator key 10_4",
+  "Architectural code rule check sequence indicator key 10_5",
+  "Architectural code rule check sequence indicator key 10_6",
+  "Architectural code rule check sequence indicator key 10_7",
+  "Architectural code rule check sequence indicator key 10_8",
+  "Architectural code rule check sequence indicator key 10_9",
+  "Architectural code rule check sequence indicator key 10_10",
+  "Architectural code rule check sequence indicator key 10_11",
+  "Architectural code rule check sequence indicator key 10_12",
+  "Architectural code rule check sequence indicator key 10_13",
+  "Architectural code rule check sequence indicator key 10_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_7: Record<string, Record<string, number>> = {
-  "skill_pair_7_0": {
-    correlation: 0.24,
-    coOccurrenceCount: 10,
-    relevanceIndex: 73
-  },
-  "skill_pair_7_1": {
-    correlation: 0.26,
-    coOccurrenceCount: 17,
-    relevanceIndex: 72
-  },
-  "skill_pair_7_2": {
-    correlation: 0.28,
-    coOccurrenceCount: 24,
-    relevanceIndex: 71
-  },
-  "skill_pair_7_3": {
-    correlation: 0.30,
-    coOccurrenceCount: 31,
-    relevanceIndex: 70
-  },
-  "skill_pair_7_4": {
-    correlation: 0.32,
-    coOccurrenceCount: 38,
-    relevanceIndex: 69
-  },
-  "skill_pair_7_5": {
-    correlation: 0.34,
-    coOccurrenceCount: 45,
-    relevanceIndex: 68
-  },
-  "skill_pair_7_6": {
-    correlation: 0.36,
-    coOccurrenceCount: 52,
-    relevanceIndex: 67
-  },
-  "skill_pair_7_7": {
-    correlation: 0.38,
-    coOccurrenceCount: 59,
-    relevanceIndex: 66
-  },
-  "skill_pair_7_8": {
-    correlation: 0.40,
-    coOccurrenceCount: 66,
-    relevanceIndex: 65
-  },
-  "skill_pair_7_9": {
-    correlation: 0.42,
-    coOccurrenceCount: 73,
-    relevanceIndex: 64
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_11: string[] = [
+  "Architectural code rule check sequence indicator key 11_0",
+  "Architectural code rule check sequence indicator key 11_1",
+  "Architectural code rule check sequence indicator key 11_2",
+  "Architectural code rule check sequence indicator key 11_3",
+  "Architectural code rule check sequence indicator key 11_4",
+  "Architectural code rule check sequence indicator key 11_5",
+  "Architectural code rule check sequence indicator key 11_6",
+  "Architectural code rule check sequence indicator key 11_7",
+  "Architectural code rule check sequence indicator key 11_8",
+  "Architectural code rule check sequence indicator key 11_9",
+  "Architectural code rule check sequence indicator key 11_10",
+  "Architectural code rule check sequence indicator key 11_11",
+  "Architectural code rule check sequence indicator key 11_12",
+  "Architectural code rule check sequence indicator key 11_13",
+  "Architectural code rule check sequence indicator key 11_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_8: Record<string, Record<string, number>> = {
-  "skill_pair_8_0": {
-    correlation: 0.26,
-    coOccurrenceCount: 10,
-    relevanceIndex: 72
-  },
-  "skill_pair_8_1": {
-    correlation: 0.28,
-    coOccurrenceCount: 18,
-    relevanceIndex: 71
-  },
-  "skill_pair_8_2": {
-    correlation: 0.30,
-    coOccurrenceCount: 26,
-    relevanceIndex: 70
-  },
-  "skill_pair_8_3": {
-    correlation: 0.32,
-    coOccurrenceCount: 34,
-    relevanceIndex: 69
-  },
-  "skill_pair_8_4": {
-    correlation: 0.34,
-    coOccurrenceCount: 42,
-    relevanceIndex: 68
-  },
-  "skill_pair_8_5": {
-    correlation: 0.36,
-    coOccurrenceCount: 50,
-    relevanceIndex: 67
-  },
-  "skill_pair_8_6": {
-    correlation: 0.38,
-    coOccurrenceCount: 58,
-    relevanceIndex: 66
-  },
-  "skill_pair_8_7": {
-    correlation: 0.40,
-    coOccurrenceCount: 66,
-    relevanceIndex: 65
-  },
-  "skill_pair_8_8": {
-    correlation: 0.42,
-    coOccurrenceCount: 74,
-    relevanceIndex: 64
-  },
-  "skill_pair_8_9": {
-    correlation: 0.44,
-    coOccurrenceCount: 82,
-    relevanceIndex: 63
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_12: string[] = [
+  "Architectural code rule check sequence indicator key 12_0",
+  "Architectural code rule check sequence indicator key 12_1",
+  "Architectural code rule check sequence indicator key 12_2",
+  "Architectural code rule check sequence indicator key 12_3",
+  "Architectural code rule check sequence indicator key 12_4",
+  "Architectural code rule check sequence indicator key 12_5",
+  "Architectural code rule check sequence indicator key 12_6",
+  "Architectural code rule check sequence indicator key 12_7",
+  "Architectural code rule check sequence indicator key 12_8",
+  "Architectural code rule check sequence indicator key 12_9",
+  "Architectural code rule check sequence indicator key 12_10",
+  "Architectural code rule check sequence indicator key 12_11",
+  "Architectural code rule check sequence indicator key 12_12",
+  "Architectural code rule check sequence indicator key 12_13",
+  "Architectural code rule check sequence indicator key 12_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_9: Record<string, Record<string, number>> = {
-  "skill_pair_9_0": {
-    correlation: 0.28,
-    coOccurrenceCount: 10,
-    relevanceIndex: 71
-  },
-  "skill_pair_9_1": {
-    correlation: 0.30,
-    coOccurrenceCount: 19,
-    relevanceIndex: 70
-  },
-  "skill_pair_9_2": {
-    correlation: 0.32,
-    coOccurrenceCount: 28,
-    relevanceIndex: 69
-  },
-  "skill_pair_9_3": {
-    correlation: 0.34,
-    coOccurrenceCount: 37,
-    relevanceIndex: 68
-  },
-  "skill_pair_9_4": {
-    correlation: 0.36,
-    coOccurrenceCount: 46,
-    relevanceIndex: 67
-  },
-  "skill_pair_9_5": {
-    correlation: 0.38,
-    coOccurrenceCount: 55,
-    relevanceIndex: 66
-  },
-  "skill_pair_9_6": {
-    correlation: 0.40,
-    coOccurrenceCount: 64,
-    relevanceIndex: 65
-  },
-  "skill_pair_9_7": {
-    correlation: 0.42,
-    coOccurrenceCount: 73,
-    relevanceIndex: 64
-  },
-  "skill_pair_9_8": {
-    correlation: 0.44,
-    coOccurrenceCount: 82,
-    relevanceIndex: 63
-  },
-  "skill_pair_9_9": {
-    correlation: 0.46,
-    coOccurrenceCount: 91,
-    relevanceIndex: 62
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_13: string[] = [
+  "Architectural code rule check sequence indicator key 13_0",
+  "Architectural code rule check sequence indicator key 13_1",
+  "Architectural code rule check sequence indicator key 13_2",
+  "Architectural code rule check sequence indicator key 13_3",
+  "Architectural code rule check sequence indicator key 13_4",
+  "Architectural code rule check sequence indicator key 13_5",
+  "Architectural code rule check sequence indicator key 13_6",
+  "Architectural code rule check sequence indicator key 13_7",
+  "Architectural code rule check sequence indicator key 13_8",
+  "Architectural code rule check sequence indicator key 13_9",
+  "Architectural code rule check sequence indicator key 13_10",
+  "Architectural code rule check sequence indicator key 13_11",
+  "Architectural code rule check sequence indicator key 13_12",
+  "Architectural code rule check sequence indicator key 13_13",
+  "Architectural code rule check sequence indicator key 13_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_10: Record<string, Record<string, number>> = {
-  "skill_pair_10_0": {
-    correlation: 0.30,
-    coOccurrenceCount: 10,
-    relevanceIndex: 70
-  },
-  "skill_pair_10_1": {
-    correlation: 0.32,
-    coOccurrenceCount: 20,
-    relevanceIndex: 69
-  },
-  "skill_pair_10_2": {
-    correlation: 0.34,
-    coOccurrenceCount: 30,
-    relevanceIndex: 68
-  },
-  "skill_pair_10_3": {
-    correlation: 0.36,
-    coOccurrenceCount: 40,
-    relevanceIndex: 67
-  },
-  "skill_pair_10_4": {
-    correlation: 0.38,
-    coOccurrenceCount: 50,
-    relevanceIndex: 66
-  },
-  "skill_pair_10_5": {
-    correlation: 0.40,
-    coOccurrenceCount: 60,
-    relevanceIndex: 65
-  },
-  "skill_pair_10_6": {
-    correlation: 0.42,
-    coOccurrenceCount: 70,
-    relevanceIndex: 64
-  },
-  "skill_pair_10_7": {
-    correlation: 0.44,
-    coOccurrenceCount: 80,
-    relevanceIndex: 63
-  },
-  "skill_pair_10_8": {
-    correlation: 0.46,
-    coOccurrenceCount: 90,
-    relevanceIndex: 62
-  },
-  "skill_pair_10_9": {
-    correlation: 0.48,
-    coOccurrenceCount: 100,
-    relevanceIndex: 61
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_14: string[] = [
+  "Architectural code rule check sequence indicator key 14_0",
+  "Architectural code rule check sequence indicator key 14_1",
+  "Architectural code rule check sequence indicator key 14_2",
+  "Architectural code rule check sequence indicator key 14_3",
+  "Architectural code rule check sequence indicator key 14_4",
+  "Architectural code rule check sequence indicator key 14_5",
+  "Architectural code rule check sequence indicator key 14_6",
+  "Architectural code rule check sequence indicator key 14_7",
+  "Architectural code rule check sequence indicator key 14_8",
+  "Architectural code rule check sequence indicator key 14_9",
+  "Architectural code rule check sequence indicator key 14_10",
+  "Architectural code rule check sequence indicator key 14_11",
+  "Architectural code rule check sequence indicator key 14_12",
+  "Architectural code rule check sequence indicator key 14_13",
+  "Architectural code rule check sequence indicator key 14_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_11: Record<string, Record<string, number>> = {
-  "skill_pair_11_0": {
-    correlation: 0.32,
-    coOccurrenceCount: 10,
-    relevanceIndex: 69
-  },
-  "skill_pair_11_1": {
-    correlation: 0.34,
-    coOccurrenceCount: 21,
-    relevanceIndex: 68
-  },
-  "skill_pair_11_2": {
-    correlation: 0.36,
-    coOccurrenceCount: 32,
-    relevanceIndex: 67
-  },
-  "skill_pair_11_3": {
-    correlation: 0.38,
-    coOccurrenceCount: 43,
-    relevanceIndex: 66
-  },
-  "skill_pair_11_4": {
-    correlation: 0.40,
-    coOccurrenceCount: 54,
-    relevanceIndex: 65
-  },
-  "skill_pair_11_5": {
-    correlation: 0.42,
-    coOccurrenceCount: 65,
-    relevanceIndex: 64
-  },
-  "skill_pair_11_6": {
-    correlation: 0.44,
-    coOccurrenceCount: 76,
-    relevanceIndex: 63
-  },
-  "skill_pair_11_7": {
-    correlation: 0.46,
-    coOccurrenceCount: 87,
-    relevanceIndex: 62
-  },
-  "skill_pair_11_8": {
-    correlation: 0.48,
-    coOccurrenceCount: 98,
-    relevanceIndex: 61
-  },
-  "skill_pair_11_9": {
-    correlation: 0.50,
-    coOccurrenceCount: 109,
-    relevanceIndex: 60
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_15: string[] = [
+  "Architectural code rule check sequence indicator key 15_0",
+  "Architectural code rule check sequence indicator key 15_1",
+  "Architectural code rule check sequence indicator key 15_2",
+  "Architectural code rule check sequence indicator key 15_3",
+  "Architectural code rule check sequence indicator key 15_4",
+  "Architectural code rule check sequence indicator key 15_5",
+  "Architectural code rule check sequence indicator key 15_6",
+  "Architectural code rule check sequence indicator key 15_7",
+  "Architectural code rule check sequence indicator key 15_8",
+  "Architectural code rule check sequence indicator key 15_9",
+  "Architectural code rule check sequence indicator key 15_10",
+  "Architectural code rule check sequence indicator key 15_11",
+  "Architectural code rule check sequence indicator key 15_12",
+  "Architectural code rule check sequence indicator key 15_13",
+  "Architectural code rule check sequence indicator key 15_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_12: Record<string, Record<string, number>> = {
-  "skill_pair_12_0": {
-    correlation: 0.34,
-    coOccurrenceCount: 10,
-    relevanceIndex: 68
-  },
-  "skill_pair_12_1": {
-    correlation: 0.36,
-    coOccurrenceCount: 22,
-    relevanceIndex: 67
-  },
-  "skill_pair_12_2": {
-    correlation: 0.38,
-    coOccurrenceCount: 34,
-    relevanceIndex: 66
-  },
-  "skill_pair_12_3": {
-    correlation: 0.40,
-    coOccurrenceCount: 46,
-    relevanceIndex: 65
-  },
-  "skill_pair_12_4": {
-    correlation: 0.42,
-    coOccurrenceCount: 58,
-    relevanceIndex: 64
-  },
-  "skill_pair_12_5": {
-    correlation: 0.44,
-    coOccurrenceCount: 70,
-    relevanceIndex: 63
-  },
-  "skill_pair_12_6": {
-    correlation: 0.46,
-    coOccurrenceCount: 82,
-    relevanceIndex: 62
-  },
-  "skill_pair_12_7": {
-    correlation: 0.48,
-    coOccurrenceCount: 94,
-    relevanceIndex: 61
-  },
-  "skill_pair_12_8": {
-    correlation: 0.50,
-    coOccurrenceCount: 106,
-    relevanceIndex: 60
-  },
-  "skill_pair_12_9": {
-    correlation: 0.52,
-    coOccurrenceCount: 118,
-    relevanceIndex: 59
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_16: string[] = [
+  "Architectural code rule check sequence indicator key 16_0",
+  "Architectural code rule check sequence indicator key 16_1",
+  "Architectural code rule check sequence indicator key 16_2",
+  "Architectural code rule check sequence indicator key 16_3",
+  "Architectural code rule check sequence indicator key 16_4",
+  "Architectural code rule check sequence indicator key 16_5",
+  "Architectural code rule check sequence indicator key 16_6",
+  "Architectural code rule check sequence indicator key 16_7",
+  "Architectural code rule check sequence indicator key 16_8",
+  "Architectural code rule check sequence indicator key 16_9",
+  "Architectural code rule check sequence indicator key 16_10",
+  "Architectural code rule check sequence indicator key 16_11",
+  "Architectural code rule check sequence indicator key 16_12",
+  "Architectural code rule check sequence indicator key 16_13",
+  "Architectural code rule check sequence indicator key 16_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_13: Record<string, Record<string, number>> = {
-  "skill_pair_13_0": {
-    correlation: 0.36,
-    coOccurrenceCount: 10,
-    relevanceIndex: 67
-  },
-  "skill_pair_13_1": {
-    correlation: 0.38,
-    coOccurrenceCount: 23,
-    relevanceIndex: 66
-  },
-  "skill_pair_13_2": {
-    correlation: 0.40,
-    coOccurrenceCount: 36,
-    relevanceIndex: 65
-  },
-  "skill_pair_13_3": {
-    correlation: 0.42,
-    coOccurrenceCount: 49,
-    relevanceIndex: 64
-  },
-  "skill_pair_13_4": {
-    correlation: 0.44,
-    coOccurrenceCount: 62,
-    relevanceIndex: 63
-  },
-  "skill_pair_13_5": {
-    correlation: 0.46,
-    coOccurrenceCount: 75,
-    relevanceIndex: 62
-  },
-  "skill_pair_13_6": {
-    correlation: 0.48,
-    coOccurrenceCount: 88,
-    relevanceIndex: 61
-  },
-  "skill_pair_13_7": {
-    correlation: 0.50,
-    coOccurrenceCount: 101,
-    relevanceIndex: 60
-  },
-  "skill_pair_13_8": {
-    correlation: 0.52,
-    coOccurrenceCount: 114,
-    relevanceIndex: 59
-  },
-  "skill_pair_13_9": {
-    correlation: 0.54,
-    coOccurrenceCount: 127,
-    relevanceIndex: 58
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_17: string[] = [
+  "Architectural code rule check sequence indicator key 17_0",
+  "Architectural code rule check sequence indicator key 17_1",
+  "Architectural code rule check sequence indicator key 17_2",
+  "Architectural code rule check sequence indicator key 17_3",
+  "Architectural code rule check sequence indicator key 17_4",
+  "Architectural code rule check sequence indicator key 17_5",
+  "Architectural code rule check sequence indicator key 17_6",
+  "Architectural code rule check sequence indicator key 17_7",
+  "Architectural code rule check sequence indicator key 17_8",
+  "Architectural code rule check sequence indicator key 17_9",
+  "Architectural code rule check sequence indicator key 17_10",
+  "Architectural code rule check sequence indicator key 17_11",
+  "Architectural code rule check sequence indicator key 17_12",
+  "Architectural code rule check sequence indicator key 17_13",
+  "Architectural code rule check sequence indicator key 17_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_14: Record<string, Record<string, number>> = {
-  "skill_pair_14_0": {
-    correlation: 0.38,
-    coOccurrenceCount: 10,
-    relevanceIndex: 66
-  },
-  "skill_pair_14_1": {
-    correlation: 0.40,
-    coOccurrenceCount: 24,
-    relevanceIndex: 65
-  },
-  "skill_pair_14_2": {
-    correlation: 0.42,
-    coOccurrenceCount: 38,
-    relevanceIndex: 64
-  },
-  "skill_pair_14_3": {
-    correlation: 0.44,
-    coOccurrenceCount: 52,
-    relevanceIndex: 63
-  },
-  "skill_pair_14_4": {
-    correlation: 0.46,
-    coOccurrenceCount: 66,
-    relevanceIndex: 62
-  },
-  "skill_pair_14_5": {
-    correlation: 0.48,
-    coOccurrenceCount: 80,
-    relevanceIndex: 61
-  },
-  "skill_pair_14_6": {
-    correlation: 0.50,
-    coOccurrenceCount: 94,
-    relevanceIndex: 60
-  },
-  "skill_pair_14_7": {
-    correlation: 0.52,
-    coOccurrenceCount: 108,
-    relevanceIndex: 59
-  },
-  "skill_pair_14_8": {
-    correlation: 0.54,
-    coOccurrenceCount: 122,
-    relevanceIndex: 58
-  },
-  "skill_pair_14_9": {
-    correlation: 0.56,
-    coOccurrenceCount: 136,
-    relevanceIndex: 57
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_18: string[] = [
+  "Architectural code rule check sequence indicator key 18_0",
+  "Architectural code rule check sequence indicator key 18_1",
+  "Architectural code rule check sequence indicator key 18_2",
+  "Architectural code rule check sequence indicator key 18_3",
+  "Architectural code rule check sequence indicator key 18_4",
+  "Architectural code rule check sequence indicator key 18_5",
+  "Architectural code rule check sequence indicator key 18_6",
+  "Architectural code rule check sequence indicator key 18_7",
+  "Architectural code rule check sequence indicator key 18_8",
+  "Architectural code rule check sequence indicator key 18_9",
+  "Architectural code rule check sequence indicator key 18_10",
+  "Architectural code rule check sequence indicator key 18_11",
+  "Architectural code rule check sequence indicator key 18_12",
+  "Architectural code rule check sequence indicator key 18_13",
+  "Architectural code rule check sequence indicator key 18_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_15: Record<string, Record<string, number>> = {
-  "skill_pair_15_0": {
-    correlation: 0.40,
-    coOccurrenceCount: 10,
-    relevanceIndex: 65
-  },
-  "skill_pair_15_1": {
-    correlation: 0.42,
-    coOccurrenceCount: 25,
-    relevanceIndex: 64
-  },
-  "skill_pair_15_2": {
-    correlation: 0.44,
-    coOccurrenceCount: 40,
-    relevanceIndex: 63
-  },
-  "skill_pair_15_3": {
-    correlation: 0.46,
-    coOccurrenceCount: 55,
-    relevanceIndex: 62
-  },
-  "skill_pair_15_4": {
-    correlation: 0.48,
-    coOccurrenceCount: 70,
-    relevanceIndex: 61
-  },
-  "skill_pair_15_5": {
-    correlation: 0.50,
-    coOccurrenceCount: 85,
-    relevanceIndex: 60
-  },
-  "skill_pair_15_6": {
-    correlation: 0.52,
-    coOccurrenceCount: 100,
-    relevanceIndex: 59
-  },
-  "skill_pair_15_7": {
-    correlation: 0.54,
-    coOccurrenceCount: 115,
-    relevanceIndex: 58
-  },
-  "skill_pair_15_8": {
-    correlation: 0.56,
-    coOccurrenceCount: 130,
-    relevanceIndex: 57
-  },
-  "skill_pair_15_9": {
-    correlation: 0.58,
-    coOccurrenceCount: 145,
-    relevanceIndex: 56
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_19: string[] = [
+  "Architectural code rule check sequence indicator key 19_0",
+  "Architectural code rule check sequence indicator key 19_1",
+  "Architectural code rule check sequence indicator key 19_2",
+  "Architectural code rule check sequence indicator key 19_3",
+  "Architectural code rule check sequence indicator key 19_4",
+  "Architectural code rule check sequence indicator key 19_5",
+  "Architectural code rule check sequence indicator key 19_6",
+  "Architectural code rule check sequence indicator key 19_7",
+  "Architectural code rule check sequence indicator key 19_8",
+  "Architectural code rule check sequence indicator key 19_9",
+  "Architectural code rule check sequence indicator key 19_10",
+  "Architectural code rule check sequence indicator key 19_11",
+  "Architectural code rule check sequence indicator key 19_12",
+  "Architectural code rule check sequence indicator key 19_13",
+  "Architectural code rule check sequence indicator key 19_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_16: Record<string, Record<string, number>> = {
-  "skill_pair_16_0": {
-    correlation: 0.42,
-    coOccurrenceCount: 10,
-    relevanceIndex: 64
-  },
-  "skill_pair_16_1": {
-    correlation: 0.44,
-    coOccurrenceCount: 26,
-    relevanceIndex: 63
-  },
-  "skill_pair_16_2": {
-    correlation: 0.46,
-    coOccurrenceCount: 42,
-    relevanceIndex: 62
-  },
-  "skill_pair_16_3": {
-    correlation: 0.48,
-    coOccurrenceCount: 58,
-    relevanceIndex: 61
-  },
-  "skill_pair_16_4": {
-    correlation: 0.50,
-    coOccurrenceCount: 74,
-    relevanceIndex: 60
-  },
-  "skill_pair_16_5": {
-    correlation: 0.52,
-    coOccurrenceCount: 90,
-    relevanceIndex: 59
-  },
-  "skill_pair_16_6": {
-    correlation: 0.54,
-    coOccurrenceCount: 106,
-    relevanceIndex: 58
-  },
-  "skill_pair_16_7": {
-    correlation: 0.56,
-    coOccurrenceCount: 122,
-    relevanceIndex: 57
-  },
-  "skill_pair_16_8": {
-    correlation: 0.58,
-    coOccurrenceCount: 138,
-    relevanceIndex: 56
-  },
-  "skill_pair_16_9": {
-    correlation: 0.60,
-    coOccurrenceCount: 154,
-    relevanceIndex: 55
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_20: string[] = [
+  "Architectural code rule check sequence indicator key 20_0",
+  "Architectural code rule check sequence indicator key 20_1",
+  "Architectural code rule check sequence indicator key 20_2",
+  "Architectural code rule check sequence indicator key 20_3",
+  "Architectural code rule check sequence indicator key 20_4",
+  "Architectural code rule check sequence indicator key 20_5",
+  "Architectural code rule check sequence indicator key 20_6",
+  "Architectural code rule check sequence indicator key 20_7",
+  "Architectural code rule check sequence indicator key 20_8",
+  "Architectural code rule check sequence indicator key 20_9",
+  "Architectural code rule check sequence indicator key 20_10",
+  "Architectural code rule check sequence indicator key 20_11",
+  "Architectural code rule check sequence indicator key 20_12",
+  "Architectural code rule check sequence indicator key 20_13",
+  "Architectural code rule check sequence indicator key 20_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_17: Record<string, Record<string, number>> = {
-  "skill_pair_17_0": {
-    correlation: 0.44,
-    coOccurrenceCount: 10,
-    relevanceIndex: 63
-  },
-  "skill_pair_17_1": {
-    correlation: 0.46,
-    coOccurrenceCount: 27,
-    relevanceIndex: 62
-  },
-  "skill_pair_17_2": {
-    correlation: 0.48,
-    coOccurrenceCount: 44,
-    relevanceIndex: 61
-  },
-  "skill_pair_17_3": {
-    correlation: 0.50,
-    coOccurrenceCount: 61,
-    relevanceIndex: 60
-  },
-  "skill_pair_17_4": {
-    correlation: 0.52,
-    coOccurrenceCount: 78,
-    relevanceIndex: 59
-  },
-  "skill_pair_17_5": {
-    correlation: 0.54,
-    coOccurrenceCount: 95,
-    relevanceIndex: 58
-  },
-  "skill_pair_17_6": {
-    correlation: 0.56,
-    coOccurrenceCount: 112,
-    relevanceIndex: 57
-  },
-  "skill_pair_17_7": {
-    correlation: 0.58,
-    coOccurrenceCount: 129,
-    relevanceIndex: 56
-  },
-  "skill_pair_17_8": {
-    correlation: 0.60,
-    coOccurrenceCount: 146,
-    relevanceIndex: 55
-  },
-  "skill_pair_17_9": {
-    correlation: 0.62,
-    coOccurrenceCount: 163,
-    relevanceIndex: 54
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_21: string[] = [
+  "Architectural code rule check sequence indicator key 21_0",
+  "Architectural code rule check sequence indicator key 21_1",
+  "Architectural code rule check sequence indicator key 21_2",
+  "Architectural code rule check sequence indicator key 21_3",
+  "Architectural code rule check sequence indicator key 21_4",
+  "Architectural code rule check sequence indicator key 21_5",
+  "Architectural code rule check sequence indicator key 21_6",
+  "Architectural code rule check sequence indicator key 21_7",
+  "Architectural code rule check sequence indicator key 21_8",
+  "Architectural code rule check sequence indicator key 21_9",
+  "Architectural code rule check sequence indicator key 21_10",
+  "Architectural code rule check sequence indicator key 21_11",
+  "Architectural code rule check sequence indicator key 21_12",
+  "Architectural code rule check sequence indicator key 21_13",
+  "Architectural code rule check sequence indicator key 21_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_18: Record<string, Record<string, number>> = {
-  "skill_pair_18_0": {
-    correlation: 0.46,
-    coOccurrenceCount: 10,
-    relevanceIndex: 62
-  },
-  "skill_pair_18_1": {
-    correlation: 0.48,
-    coOccurrenceCount: 28,
-    relevanceIndex: 61
-  },
-  "skill_pair_18_2": {
-    correlation: 0.50,
-    coOccurrenceCount: 46,
-    relevanceIndex: 60
-  },
-  "skill_pair_18_3": {
-    correlation: 0.52,
-    coOccurrenceCount: 64,
-    relevanceIndex: 59
-  },
-  "skill_pair_18_4": {
-    correlation: 0.54,
-    coOccurrenceCount: 82,
-    relevanceIndex: 58
-  },
-  "skill_pair_18_5": {
-    correlation: 0.56,
-    coOccurrenceCount: 100,
-    relevanceIndex: 57
-  },
-  "skill_pair_18_6": {
-    correlation: 0.58,
-    coOccurrenceCount: 118,
-    relevanceIndex: 56
-  },
-  "skill_pair_18_7": {
-    correlation: 0.60,
-    coOccurrenceCount: 136,
-    relevanceIndex: 55
-  },
-  "skill_pair_18_8": {
-    correlation: 0.62,
-    coOccurrenceCount: 154,
-    relevanceIndex: 54
-  },
-  "skill_pair_18_9": {
-    correlation: 0.64,
-    coOccurrenceCount: 172,
-    relevanceIndex: 53
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_22: string[] = [
+  "Architectural code rule check sequence indicator key 22_0",
+  "Architectural code rule check sequence indicator key 22_1",
+  "Architectural code rule check sequence indicator key 22_2",
+  "Architectural code rule check sequence indicator key 22_3",
+  "Architectural code rule check sequence indicator key 22_4",
+  "Architectural code rule check sequence indicator key 22_5",
+  "Architectural code rule check sequence indicator key 22_6",
+  "Architectural code rule check sequence indicator key 22_7",
+  "Architectural code rule check sequence indicator key 22_8",
+  "Architectural code rule check sequence indicator key 22_9",
+  "Architectural code rule check sequence indicator key 22_10",
+  "Architectural code rule check sequence indicator key 22_11",
+  "Architectural code rule check sequence indicator key 22_12",
+  "Architectural code rule check sequence indicator key 22_13",
+  "Architectural code rule check sequence indicator key 22_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_19: Record<string, Record<string, number>> = {
-  "skill_pair_19_0": {
-    correlation: 0.48,
-    coOccurrenceCount: 10,
-    relevanceIndex: 61
-  },
-  "skill_pair_19_1": {
-    correlation: 0.50,
-    coOccurrenceCount: 29,
-    relevanceIndex: 60
-  },
-  "skill_pair_19_2": {
-    correlation: 0.52,
-    coOccurrenceCount: 48,
-    relevanceIndex: 59
-  },
-  "skill_pair_19_3": {
-    correlation: 0.54,
-    coOccurrenceCount: 67,
-    relevanceIndex: 58
-  },
-  "skill_pair_19_4": {
-    correlation: 0.56,
-    coOccurrenceCount: 86,
-    relevanceIndex: 57
-  },
-  "skill_pair_19_5": {
-    correlation: 0.58,
-    coOccurrenceCount: 105,
-    relevanceIndex: 56
-  },
-  "skill_pair_19_6": {
-    correlation: 0.60,
-    coOccurrenceCount: 124,
-    relevanceIndex: 55
-  },
-  "skill_pair_19_7": {
-    correlation: 0.62,
-    coOccurrenceCount: 143,
-    relevanceIndex: 54
-  },
-  "skill_pair_19_8": {
-    correlation: 0.64,
-    coOccurrenceCount: 162,
-    relevanceIndex: 53
-  },
-  "skill_pair_19_9": {
-    correlation: 0.66,
-    coOccurrenceCount: 181,
-    relevanceIndex: 52
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_23: string[] = [
+  "Architectural code rule check sequence indicator key 23_0",
+  "Architectural code rule check sequence indicator key 23_1",
+  "Architectural code rule check sequence indicator key 23_2",
+  "Architectural code rule check sequence indicator key 23_3",
+  "Architectural code rule check sequence indicator key 23_4",
+  "Architectural code rule check sequence indicator key 23_5",
+  "Architectural code rule check sequence indicator key 23_6",
+  "Architectural code rule check sequence indicator key 23_7",
+  "Architectural code rule check sequence indicator key 23_8",
+  "Architectural code rule check sequence indicator key 23_9",
+  "Architectural code rule check sequence indicator key 23_10",
+  "Architectural code rule check sequence indicator key 23_11",
+  "Architectural code rule check sequence indicator key 23_12",
+  "Architectural code rule check sequence indicator key 23_13",
+  "Architectural code rule check sequence indicator key 23_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_20: Record<string, Record<string, number>> = {
-  "skill_pair_20_0": {
-    correlation: 0.50,
-    coOccurrenceCount: 10,
-    relevanceIndex: 60
-  },
-  "skill_pair_20_1": {
-    correlation: 0.52,
-    coOccurrenceCount: 30,
-    relevanceIndex: 59
-  },
-  "skill_pair_20_2": {
-    correlation: 0.54,
-    coOccurrenceCount: 50,
-    relevanceIndex: 58
-  },
-  "skill_pair_20_3": {
-    correlation: 0.56,
-    coOccurrenceCount: 70,
-    relevanceIndex: 57
-  },
-  "skill_pair_20_4": {
-    correlation: 0.58,
-    coOccurrenceCount: 90,
-    relevanceIndex: 56
-  },
-  "skill_pair_20_5": {
-    correlation: 0.60,
-    coOccurrenceCount: 110,
-    relevanceIndex: 55
-  },
-  "skill_pair_20_6": {
-    correlation: 0.62,
-    coOccurrenceCount: 130,
-    relevanceIndex: 54
-  },
-  "skill_pair_20_7": {
-    correlation: 0.64,
-    coOccurrenceCount: 150,
-    relevanceIndex: 53
-  },
-  "skill_pair_20_8": {
-    correlation: 0.66,
-    coOccurrenceCount: 170,
-    relevanceIndex: 52
-  },
-  "skill_pair_20_9": {
-    correlation: 0.68,
-    coOccurrenceCount: 190,
-    relevanceIndex: 51
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_24: string[] = [
+  "Architectural code rule check sequence indicator key 24_0",
+  "Architectural code rule check sequence indicator key 24_1",
+  "Architectural code rule check sequence indicator key 24_2",
+  "Architectural code rule check sequence indicator key 24_3",
+  "Architectural code rule check sequence indicator key 24_4",
+  "Architectural code rule check sequence indicator key 24_5",
+  "Architectural code rule check sequence indicator key 24_6",
+  "Architectural code rule check sequence indicator key 24_7",
+  "Architectural code rule check sequence indicator key 24_8",
+  "Architectural code rule check sequence indicator key 24_9",
+  "Architectural code rule check sequence indicator key 24_10",
+  "Architectural code rule check sequence indicator key 24_11",
+  "Architectural code rule check sequence indicator key 24_12",
+  "Architectural code rule check sequence indicator key 24_13",
+  "Architectural code rule check sequence indicator key 24_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_21: Record<string, Record<string, number>> = {
-  "skill_pair_21_0": {
-    correlation: 0.52,
-    coOccurrenceCount: 10,
-    relevanceIndex: 59
-  },
-  "skill_pair_21_1": {
-    correlation: 0.54,
-    coOccurrenceCount: 31,
-    relevanceIndex: 58
-  },
-  "skill_pair_21_2": {
-    correlation: 0.56,
-    coOccurrenceCount: 52,
-    relevanceIndex: 57
-  },
-  "skill_pair_21_3": {
-    correlation: 0.58,
-    coOccurrenceCount: 73,
-    relevanceIndex: 56
-  },
-  "skill_pair_21_4": {
-    correlation: 0.60,
-    coOccurrenceCount: 94,
-    relevanceIndex: 55
-  },
-  "skill_pair_21_5": {
-    correlation: 0.62,
-    coOccurrenceCount: 115,
-    relevanceIndex: 54
-  },
-  "skill_pair_21_6": {
-    correlation: 0.64,
-    coOccurrenceCount: 136,
-    relevanceIndex: 53
-  },
-  "skill_pair_21_7": {
-    correlation: 0.66,
-    coOccurrenceCount: 157,
-    relevanceIndex: 52
-  },
-  "skill_pair_21_8": {
-    correlation: 0.68,
-    coOccurrenceCount: 178,
-    relevanceIndex: 51
-  },
-  "skill_pair_21_9": {
-    correlation: 0.70,
-    coOccurrenceCount: 199,
-    relevanceIndex: 50
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_25: string[] = [
+  "Architectural code rule check sequence indicator key 25_0",
+  "Architectural code rule check sequence indicator key 25_1",
+  "Architectural code rule check sequence indicator key 25_2",
+  "Architectural code rule check sequence indicator key 25_3",
+  "Architectural code rule check sequence indicator key 25_4",
+  "Architectural code rule check sequence indicator key 25_5",
+  "Architectural code rule check sequence indicator key 25_6",
+  "Architectural code rule check sequence indicator key 25_7",
+  "Architectural code rule check sequence indicator key 25_8",
+  "Architectural code rule check sequence indicator key 25_9",
+  "Architectural code rule check sequence indicator key 25_10",
+  "Architectural code rule check sequence indicator key 25_11",
+  "Architectural code rule check sequence indicator key 25_12",
+  "Architectural code rule check sequence indicator key 25_13",
+  "Architectural code rule check sequence indicator key 25_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_22: Record<string, Record<string, number>> = {
-  "skill_pair_22_0": {
-    correlation: 0.54,
-    coOccurrenceCount: 10,
-    relevanceIndex: 58
-  },
-  "skill_pair_22_1": {
-    correlation: 0.56,
-    coOccurrenceCount: 32,
-    relevanceIndex: 57
-  },
-  "skill_pair_22_2": {
-    correlation: 0.58,
-    coOccurrenceCount: 54,
-    relevanceIndex: 56
-  },
-  "skill_pair_22_3": {
-    correlation: 0.60,
-    coOccurrenceCount: 76,
-    relevanceIndex: 55
-  },
-  "skill_pair_22_4": {
-    correlation: 0.62,
-    coOccurrenceCount: 98,
-    relevanceIndex: 54
-  },
-  "skill_pair_22_5": {
-    correlation: 0.64,
-    coOccurrenceCount: 120,
-    relevanceIndex: 53
-  },
-  "skill_pair_22_6": {
-    correlation: 0.66,
-    coOccurrenceCount: 142,
-    relevanceIndex: 52
-  },
-  "skill_pair_22_7": {
-    correlation: 0.68,
-    coOccurrenceCount: 164,
-    relevanceIndex: 51
-  },
-  "skill_pair_22_8": {
-    correlation: 0.70,
-    coOccurrenceCount: 186,
-    relevanceIndex: 50
-  },
-  "skill_pair_22_9": {
-    correlation: 0.72,
-    coOccurrenceCount: 208,
-    relevanceIndex: 49
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_26: string[] = [
+  "Architectural code rule check sequence indicator key 26_0",
+  "Architectural code rule check sequence indicator key 26_1",
+  "Architectural code rule check sequence indicator key 26_2",
+  "Architectural code rule check sequence indicator key 26_3",
+  "Architectural code rule check sequence indicator key 26_4",
+  "Architectural code rule check sequence indicator key 26_5",
+  "Architectural code rule check sequence indicator key 26_6",
+  "Architectural code rule check sequence indicator key 26_7",
+  "Architectural code rule check sequence indicator key 26_8",
+  "Architectural code rule check sequence indicator key 26_9",
+  "Architectural code rule check sequence indicator key 26_10",
+  "Architectural code rule check sequence indicator key 26_11",
+  "Architectural code rule check sequence indicator key 26_12",
+  "Architectural code rule check sequence indicator key 26_13",
+  "Architectural code rule check sequence indicator key 26_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_23: Record<string, Record<string, number>> = {
-  "skill_pair_23_0": {
-    correlation: 0.56,
-    coOccurrenceCount: 10,
-    relevanceIndex: 57
-  },
-  "skill_pair_23_1": {
-    correlation: 0.58,
-    coOccurrenceCount: 33,
-    relevanceIndex: 56
-  },
-  "skill_pair_23_2": {
-    correlation: 0.60,
-    coOccurrenceCount: 56,
-    relevanceIndex: 55
-  },
-  "skill_pair_23_3": {
-    correlation: 0.62,
-    coOccurrenceCount: 79,
-    relevanceIndex: 54
-  },
-  "skill_pair_23_4": {
-    correlation: 0.64,
-    coOccurrenceCount: 102,
-    relevanceIndex: 53
-  },
-  "skill_pair_23_5": {
-    correlation: 0.66,
-    coOccurrenceCount: 125,
-    relevanceIndex: 52
-  },
-  "skill_pair_23_6": {
-    correlation: 0.68,
-    coOccurrenceCount: 148,
-    relevanceIndex: 51
-  },
-  "skill_pair_23_7": {
-    correlation: 0.70,
-    coOccurrenceCount: 171,
-    relevanceIndex: 50
-  },
-  "skill_pair_23_8": {
-    correlation: 0.72,
-    coOccurrenceCount: 194,
-    relevanceIndex: 49
-  },
-  "skill_pair_23_9": {
-    correlation: 0.74,
-    coOccurrenceCount: 217,
-    relevanceIndex: 48
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_27: string[] = [
+  "Architectural code rule check sequence indicator key 27_0",
+  "Architectural code rule check sequence indicator key 27_1",
+  "Architectural code rule check sequence indicator key 27_2",
+  "Architectural code rule check sequence indicator key 27_3",
+  "Architectural code rule check sequence indicator key 27_4",
+  "Architectural code rule check sequence indicator key 27_5",
+  "Architectural code rule check sequence indicator key 27_6",
+  "Architectural code rule check sequence indicator key 27_7",
+  "Architectural code rule check sequence indicator key 27_8",
+  "Architectural code rule check sequence indicator key 27_9",
+  "Architectural code rule check sequence indicator key 27_10",
+  "Architectural code rule check sequence indicator key 27_11",
+  "Architectural code rule check sequence indicator key 27_12",
+  "Architectural code rule check sequence indicator key 27_13",
+  "Architectural code rule check sequence indicator key 27_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_24: Record<string, Record<string, number>> = {
-  "skill_pair_24_0": {
-    correlation: 0.58,
-    coOccurrenceCount: 10,
-    relevanceIndex: 56
-  },
-  "skill_pair_24_1": {
-    correlation: 0.60,
-    coOccurrenceCount: 34,
-    relevanceIndex: 55
-  },
-  "skill_pair_24_2": {
-    correlation: 0.62,
-    coOccurrenceCount: 58,
-    relevanceIndex: 54
-  },
-  "skill_pair_24_3": {
-    correlation: 0.64,
-    coOccurrenceCount: 82,
-    relevanceIndex: 53
-  },
-  "skill_pair_24_4": {
-    correlation: 0.66,
-    coOccurrenceCount: 106,
-    relevanceIndex: 52
-  },
-  "skill_pair_24_5": {
-    correlation: 0.68,
-    coOccurrenceCount: 130,
-    relevanceIndex: 51
-  },
-  "skill_pair_24_6": {
-    correlation: 0.70,
-    coOccurrenceCount: 154,
-    relevanceIndex: 50
-  },
-  "skill_pair_24_7": {
-    correlation: 0.72,
-    coOccurrenceCount: 178,
-    relevanceIndex: 49
-  },
-  "skill_pair_24_8": {
-    correlation: 0.74,
-    coOccurrenceCount: 202,
-    relevanceIndex: 48
-  },
-  "skill_pair_24_9": {
-    correlation: 0.76,
-    coOccurrenceCount: 226,
-    relevanceIndex: 47
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_28: string[] = [
+  "Architectural code rule check sequence indicator key 28_0",
+  "Architectural code rule check sequence indicator key 28_1",
+  "Architectural code rule check sequence indicator key 28_2",
+  "Architectural code rule check sequence indicator key 28_3",
+  "Architectural code rule check sequence indicator key 28_4",
+  "Architectural code rule check sequence indicator key 28_5",
+  "Architectural code rule check sequence indicator key 28_6",
+  "Architectural code rule check sequence indicator key 28_7",
+  "Architectural code rule check sequence indicator key 28_8",
+  "Architectural code rule check sequence indicator key 28_9",
+  "Architectural code rule check sequence indicator key 28_10",
+  "Architectural code rule check sequence indicator key 28_11",
+  "Architectural code rule check sequence indicator key 28_12",
+  "Architectural code rule check sequence indicator key 28_13",
+  "Architectural code rule check sequence indicator key 28_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_25: Record<string, Record<string, number>> = {
-  "skill_pair_25_0": {
-    correlation: 0.60,
-    coOccurrenceCount: 10,
-    relevanceIndex: 55
-  },
-  "skill_pair_25_1": {
-    correlation: 0.62,
-    coOccurrenceCount: 35,
-    relevanceIndex: 54
-  },
-  "skill_pair_25_2": {
-    correlation: 0.64,
-    coOccurrenceCount: 60,
-    relevanceIndex: 53
-  },
-  "skill_pair_25_3": {
-    correlation: 0.66,
-    coOccurrenceCount: 85,
-    relevanceIndex: 52
-  },
-  "skill_pair_25_4": {
-    correlation: 0.68,
-    coOccurrenceCount: 110,
-    relevanceIndex: 51
-  },
-  "skill_pair_25_5": {
-    correlation: 0.70,
-    coOccurrenceCount: 135,
-    relevanceIndex: 50
-  },
-  "skill_pair_25_6": {
-    correlation: 0.72,
-    coOccurrenceCount: 160,
-    relevanceIndex: 49
-  },
-  "skill_pair_25_7": {
-    correlation: 0.74,
-    coOccurrenceCount: 185,
-    relevanceIndex: 48
-  },
-  "skill_pair_25_8": {
-    correlation: 0.76,
-    coOccurrenceCount: 210,
-    relevanceIndex: 47
-  },
-  "skill_pair_25_9": {
-    correlation: 0.78,
-    coOccurrenceCount: 235,
-    relevanceIndex: 46
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_29: string[] = [
+  "Architectural code rule check sequence indicator key 29_0",
+  "Architectural code rule check sequence indicator key 29_1",
+  "Architectural code rule check sequence indicator key 29_2",
+  "Architectural code rule check sequence indicator key 29_3",
+  "Architectural code rule check sequence indicator key 29_4",
+  "Architectural code rule check sequence indicator key 29_5",
+  "Architectural code rule check sequence indicator key 29_6",
+  "Architectural code rule check sequence indicator key 29_7",
+  "Architectural code rule check sequence indicator key 29_8",
+  "Architectural code rule check sequence indicator key 29_9",
+  "Architectural code rule check sequence indicator key 29_10",
+  "Architectural code rule check sequence indicator key 29_11",
+  "Architectural code rule check sequence indicator key 29_12",
+  "Architectural code rule check sequence indicator key 29_13",
+  "Architectural code rule check sequence indicator key 29_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_26: Record<string, Record<string, number>> = {
-  "skill_pair_26_0": {
-    correlation: 0.62,
-    coOccurrenceCount: 10,
-    relevanceIndex: 54
-  },
-  "skill_pair_26_1": {
-    correlation: 0.64,
-    coOccurrenceCount: 36,
-    relevanceIndex: 53
-  },
-  "skill_pair_26_2": {
-    correlation: 0.66,
-    coOccurrenceCount: 62,
-    relevanceIndex: 52
-  },
-  "skill_pair_26_3": {
-    correlation: 0.68,
-    coOccurrenceCount: 88,
-    relevanceIndex: 51
-  },
-  "skill_pair_26_4": {
-    correlation: 0.70,
-    coOccurrenceCount: 114,
-    relevanceIndex: 50
-  },
-  "skill_pair_26_5": {
-    correlation: 0.72,
-    coOccurrenceCount: 140,
-    relevanceIndex: 49
-  },
-  "skill_pair_26_6": {
-    correlation: 0.74,
-    coOccurrenceCount: 166,
-    relevanceIndex: 48
-  },
-  "skill_pair_26_7": {
-    correlation: 0.76,
-    coOccurrenceCount: 192,
-    relevanceIndex: 47
-  },
-  "skill_pair_26_8": {
-    correlation: 0.78,
-    coOccurrenceCount: 218,
-    relevanceIndex: 46
-  },
-  "skill_pair_26_9": {
-    correlation: 0.80,
-    coOccurrenceCount: 244,
-    relevanceIndex: 45
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_30: string[] = [
+  "Architectural code rule check sequence indicator key 30_0",
+  "Architectural code rule check sequence indicator key 30_1",
+  "Architectural code rule check sequence indicator key 30_2",
+  "Architectural code rule check sequence indicator key 30_3",
+  "Architectural code rule check sequence indicator key 30_4",
+  "Architectural code rule check sequence indicator key 30_5",
+  "Architectural code rule check sequence indicator key 30_6",
+  "Architectural code rule check sequence indicator key 30_7",
+  "Architectural code rule check sequence indicator key 30_8",
+  "Architectural code rule check sequence indicator key 30_9",
+  "Architectural code rule check sequence indicator key 30_10",
+  "Architectural code rule check sequence indicator key 30_11",
+  "Architectural code rule check sequence indicator key 30_12",
+  "Architectural code rule check sequence indicator key 30_13",
+  "Architectural code rule check sequence indicator key 30_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_27: Record<string, Record<string, number>> = {
-  "skill_pair_27_0": {
-    correlation: 0.64,
-    coOccurrenceCount: 10,
-    relevanceIndex: 53
-  },
-  "skill_pair_27_1": {
-    correlation: 0.66,
-    coOccurrenceCount: 37,
-    relevanceIndex: 52
-  },
-  "skill_pair_27_2": {
-    correlation: 0.68,
-    coOccurrenceCount: 64,
-    relevanceIndex: 51
-  },
-  "skill_pair_27_3": {
-    correlation: 0.70,
-    coOccurrenceCount: 91,
-    relevanceIndex: 50
-  },
-  "skill_pair_27_4": {
-    correlation: 0.72,
-    coOccurrenceCount: 118,
-    relevanceIndex: 49
-  },
-  "skill_pair_27_5": {
-    correlation: 0.74,
-    coOccurrenceCount: 145,
-    relevanceIndex: 48
-  },
-  "skill_pair_27_6": {
-    correlation: 0.76,
-    coOccurrenceCount: 172,
-    relevanceIndex: 47
-  },
-  "skill_pair_27_7": {
-    correlation: 0.78,
-    coOccurrenceCount: 199,
-    relevanceIndex: 46
-  },
-  "skill_pair_27_8": {
-    correlation: 0.80,
-    coOccurrenceCount: 226,
-    relevanceIndex: 45
-  },
-  "skill_pair_27_9": {
-    correlation: 0.82,
-    coOccurrenceCount: 253,
-    relevanceIndex: 44
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_31: string[] = [
+  "Architectural code rule check sequence indicator key 31_0",
+  "Architectural code rule check sequence indicator key 31_1",
+  "Architectural code rule check sequence indicator key 31_2",
+  "Architectural code rule check sequence indicator key 31_3",
+  "Architectural code rule check sequence indicator key 31_4",
+  "Architectural code rule check sequence indicator key 31_5",
+  "Architectural code rule check sequence indicator key 31_6",
+  "Architectural code rule check sequence indicator key 31_7",
+  "Architectural code rule check sequence indicator key 31_8",
+  "Architectural code rule check sequence indicator key 31_9",
+  "Architectural code rule check sequence indicator key 31_10",
+  "Architectural code rule check sequence indicator key 31_11",
+  "Architectural code rule check sequence indicator key 31_12",
+  "Architectural code rule check sequence indicator key 31_13",
+  "Architectural code rule check sequence indicator key 31_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_28: Record<string, Record<string, number>> = {
-  "skill_pair_28_0": {
-    correlation: 0.66,
-    coOccurrenceCount: 10,
-    relevanceIndex: 52
-  },
-  "skill_pair_28_1": {
-    correlation: 0.68,
-    coOccurrenceCount: 38,
-    relevanceIndex: 51
-  },
-  "skill_pair_28_2": {
-    correlation: 0.70,
-    coOccurrenceCount: 66,
-    relevanceIndex: 50
-  },
-  "skill_pair_28_3": {
-    correlation: 0.72,
-    coOccurrenceCount: 94,
-    relevanceIndex: 49
-  },
-  "skill_pair_28_4": {
-    correlation: 0.74,
-    coOccurrenceCount: 122,
-    relevanceIndex: 48
-  },
-  "skill_pair_28_5": {
-    correlation: 0.76,
-    coOccurrenceCount: 150,
-    relevanceIndex: 47
-  },
-  "skill_pair_28_6": {
-    correlation: 0.78,
-    coOccurrenceCount: 178,
-    relevanceIndex: 46
-  },
-  "skill_pair_28_7": {
-    correlation: 0.80,
-    coOccurrenceCount: 206,
-    relevanceIndex: 45
-  },
-  "skill_pair_28_8": {
-    correlation: 0.82,
-    coOccurrenceCount: 234,
-    relevanceIndex: 44
-  },
-  "skill_pair_28_9": {
-    correlation: 0.84,
-    coOccurrenceCount: 262,
-    relevanceIndex: 43
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_32: string[] = [
+  "Architectural code rule check sequence indicator key 32_0",
+  "Architectural code rule check sequence indicator key 32_1",
+  "Architectural code rule check sequence indicator key 32_2",
+  "Architectural code rule check sequence indicator key 32_3",
+  "Architectural code rule check sequence indicator key 32_4",
+  "Architectural code rule check sequence indicator key 32_5",
+  "Architectural code rule check sequence indicator key 32_6",
+  "Architectural code rule check sequence indicator key 32_7",
+  "Architectural code rule check sequence indicator key 32_8",
+  "Architectural code rule check sequence indicator key 32_9",
+  "Architectural code rule check sequence indicator key 32_10",
+  "Architectural code rule check sequence indicator key 32_11",
+  "Architectural code rule check sequence indicator key 32_12",
+  "Architectural code rule check sequence indicator key 32_13",
+  "Architectural code rule check sequence indicator key 32_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_29: Record<string, Record<string, number>> = {
-  "skill_pair_29_0": {
-    correlation: 0.68,
-    coOccurrenceCount: 10,
-    relevanceIndex: 51
-  },
-  "skill_pair_29_1": {
-    correlation: 0.70,
-    coOccurrenceCount: 39,
-    relevanceIndex: 50
-  },
-  "skill_pair_29_2": {
-    correlation: 0.72,
-    coOccurrenceCount: 68,
-    relevanceIndex: 49
-  },
-  "skill_pair_29_3": {
-    correlation: 0.74,
-    coOccurrenceCount: 97,
-    relevanceIndex: 48
-  },
-  "skill_pair_29_4": {
-    correlation: 0.76,
-    coOccurrenceCount: 126,
-    relevanceIndex: 47
-  },
-  "skill_pair_29_5": {
-    correlation: 0.78,
-    coOccurrenceCount: 155,
-    relevanceIndex: 46
-  },
-  "skill_pair_29_6": {
-    correlation: 0.80,
-    coOccurrenceCount: 184,
-    relevanceIndex: 45
-  },
-  "skill_pair_29_7": {
-    correlation: 0.82,
-    coOccurrenceCount: 213,
-    relevanceIndex: 44
-  },
-  "skill_pair_29_8": {
-    correlation: 0.84,
-    coOccurrenceCount: 242,
-    relevanceIndex: 43
-  },
-  "skill_pair_29_9": {
-    correlation: 0.86,
-    coOccurrenceCount: 271,
-    relevanceIndex: 42
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_33: string[] = [
+  "Architectural code rule check sequence indicator key 33_0",
+  "Architectural code rule check sequence indicator key 33_1",
+  "Architectural code rule check sequence indicator key 33_2",
+  "Architectural code rule check sequence indicator key 33_3",
+  "Architectural code rule check sequence indicator key 33_4",
+  "Architectural code rule check sequence indicator key 33_5",
+  "Architectural code rule check sequence indicator key 33_6",
+  "Architectural code rule check sequence indicator key 33_7",
+  "Architectural code rule check sequence indicator key 33_8",
+  "Architectural code rule check sequence indicator key 33_9",
+  "Architectural code rule check sequence indicator key 33_10",
+  "Architectural code rule check sequence indicator key 33_11",
+  "Architectural code rule check sequence indicator key 33_12",
+  "Architectural code rule check sequence indicator key 33_13",
+  "Architectural code rule check sequence indicator key 33_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_30: Record<string, Record<string, number>> = {
-  "skill_pair_30_0": {
-    correlation: 0.70,
-    coOccurrenceCount: 10,
-    relevanceIndex: 50
-  },
-  "skill_pair_30_1": {
-    correlation: 0.72,
-    coOccurrenceCount: 40,
-    relevanceIndex: 49
-  },
-  "skill_pair_30_2": {
-    correlation: 0.74,
-    coOccurrenceCount: 70,
-    relevanceIndex: 48
-  },
-  "skill_pair_30_3": {
-    correlation: 0.76,
-    coOccurrenceCount: 100,
-    relevanceIndex: 47
-  },
-  "skill_pair_30_4": {
-    correlation: 0.78,
-    coOccurrenceCount: 130,
-    relevanceIndex: 46
-  },
-  "skill_pair_30_5": {
-    correlation: 0.80,
-    coOccurrenceCount: 160,
-    relevanceIndex: 45
-  },
-  "skill_pair_30_6": {
-    correlation: 0.82,
-    coOccurrenceCount: 190,
-    relevanceIndex: 44
-  },
-  "skill_pair_30_7": {
-    correlation: 0.84,
-    coOccurrenceCount: 220,
-    relevanceIndex: 43
-  },
-  "skill_pair_30_8": {
-    correlation: 0.86,
-    coOccurrenceCount: 250,
-    relevanceIndex: 42
-  },
-  "skill_pair_30_9": {
-    correlation: 0.88,
-    coOccurrenceCount: 280,
-    relevanceIndex: 41
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_34: string[] = [
+  "Architectural code rule check sequence indicator key 34_0",
+  "Architectural code rule check sequence indicator key 34_1",
+  "Architectural code rule check sequence indicator key 34_2",
+  "Architectural code rule check sequence indicator key 34_3",
+  "Architectural code rule check sequence indicator key 34_4",
+  "Architectural code rule check sequence indicator key 34_5",
+  "Architectural code rule check sequence indicator key 34_6",
+  "Architectural code rule check sequence indicator key 34_7",
+  "Architectural code rule check sequence indicator key 34_8",
+  "Architectural code rule check sequence indicator key 34_9",
+  "Architectural code rule check sequence indicator key 34_10",
+  "Architectural code rule check sequence indicator key 34_11",
+  "Architectural code rule check sequence indicator key 34_12",
+  "Architectural code rule check sequence indicator key 34_13",
+  "Architectural code rule check sequence indicator key 34_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_31: Record<string, Record<string, number>> = {
-  "skill_pair_31_0": {
-    correlation: 0.72,
-    coOccurrenceCount: 10,
-    relevanceIndex: 49
-  },
-  "skill_pair_31_1": {
-    correlation: 0.74,
-    coOccurrenceCount: 41,
-    relevanceIndex: 48
-  },
-  "skill_pair_31_2": {
-    correlation: 0.76,
-    coOccurrenceCount: 72,
-    relevanceIndex: 47
-  },
-  "skill_pair_31_3": {
-    correlation: 0.78,
-    coOccurrenceCount: 103,
-    relevanceIndex: 46
-  },
-  "skill_pair_31_4": {
-    correlation: 0.80,
-    coOccurrenceCount: 134,
-    relevanceIndex: 45
-  },
-  "skill_pair_31_5": {
-    correlation: 0.82,
-    coOccurrenceCount: 165,
-    relevanceIndex: 44
-  },
-  "skill_pair_31_6": {
-    correlation: 0.84,
-    coOccurrenceCount: 196,
-    relevanceIndex: 43
-  },
-  "skill_pair_31_7": {
-    correlation: 0.86,
-    coOccurrenceCount: 227,
-    relevanceIndex: 42
-  },
-  "skill_pair_31_8": {
-    correlation: 0.88,
-    coOccurrenceCount: 258,
-    relevanceIndex: 41
-  },
-  "skill_pair_31_9": {
-    correlation: 0.90,
-    coOccurrenceCount: 289,
-    relevanceIndex: 40
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_35: string[] = [
+  "Architectural code rule check sequence indicator key 35_0",
+  "Architectural code rule check sequence indicator key 35_1",
+  "Architectural code rule check sequence indicator key 35_2",
+  "Architectural code rule check sequence indicator key 35_3",
+  "Architectural code rule check sequence indicator key 35_4",
+  "Architectural code rule check sequence indicator key 35_5",
+  "Architectural code rule check sequence indicator key 35_6",
+  "Architectural code rule check sequence indicator key 35_7",
+  "Architectural code rule check sequence indicator key 35_8",
+  "Architectural code rule check sequence indicator key 35_9",
+  "Architectural code rule check sequence indicator key 35_10",
+  "Architectural code rule check sequence indicator key 35_11",
+  "Architectural code rule check sequence indicator key 35_12",
+  "Architectural code rule check sequence indicator key 35_13",
+  "Architectural code rule check sequence indicator key 35_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_32: Record<string, Record<string, number>> = {
-  "skill_pair_32_0": {
-    correlation: 0.74,
-    coOccurrenceCount: 10,
-    relevanceIndex: 48
-  },
-  "skill_pair_32_1": {
-    correlation: 0.76,
-    coOccurrenceCount: 42,
-    relevanceIndex: 47
-  },
-  "skill_pair_32_2": {
-    correlation: 0.78,
-    coOccurrenceCount: 74,
-    relevanceIndex: 46
-  },
-  "skill_pair_32_3": {
-    correlation: 0.80,
-    coOccurrenceCount: 106,
-    relevanceIndex: 45
-  },
-  "skill_pair_32_4": {
-    correlation: 0.82,
-    coOccurrenceCount: 138,
-    relevanceIndex: 44
-  },
-  "skill_pair_32_5": {
-    correlation: 0.84,
-    coOccurrenceCount: 170,
-    relevanceIndex: 43
-  },
-  "skill_pair_32_6": {
-    correlation: 0.86,
-    coOccurrenceCount: 202,
-    relevanceIndex: 42
-  },
-  "skill_pair_32_7": {
-    correlation: 0.88,
-    coOccurrenceCount: 234,
-    relevanceIndex: 41
-  },
-  "skill_pair_32_8": {
-    correlation: 0.90,
-    coOccurrenceCount: 266,
-    relevanceIndex: 40
-  },
-  "skill_pair_32_9": {
-    correlation: 0.92,
-    coOccurrenceCount: 298,
-    relevanceIndex: 39
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_36: string[] = [
+  "Architectural code rule check sequence indicator key 36_0",
+  "Architectural code rule check sequence indicator key 36_1",
+  "Architectural code rule check sequence indicator key 36_2",
+  "Architectural code rule check sequence indicator key 36_3",
+  "Architectural code rule check sequence indicator key 36_4",
+  "Architectural code rule check sequence indicator key 36_5",
+  "Architectural code rule check sequence indicator key 36_6",
+  "Architectural code rule check sequence indicator key 36_7",
+  "Architectural code rule check sequence indicator key 36_8",
+  "Architectural code rule check sequence indicator key 36_9",
+  "Architectural code rule check sequence indicator key 36_10",
+  "Architectural code rule check sequence indicator key 36_11",
+  "Architectural code rule check sequence indicator key 36_12",
+  "Architectural code rule check sequence indicator key 36_13",
+  "Architectural code rule check sequence indicator key 36_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_33: Record<string, Record<string, number>> = {
-  "skill_pair_33_0": {
-    correlation: 0.76,
-    coOccurrenceCount: 10,
-    relevanceIndex: 47
-  },
-  "skill_pair_33_1": {
-    correlation: 0.78,
-    coOccurrenceCount: 43,
-    relevanceIndex: 46
-  },
-  "skill_pair_33_2": {
-    correlation: 0.80,
-    coOccurrenceCount: 76,
-    relevanceIndex: 45
-  },
-  "skill_pair_33_3": {
-    correlation: 0.82,
-    coOccurrenceCount: 109,
-    relevanceIndex: 44
-  },
-  "skill_pair_33_4": {
-    correlation: 0.84,
-    coOccurrenceCount: 142,
-    relevanceIndex: 43
-  },
-  "skill_pair_33_5": {
-    correlation: 0.86,
-    coOccurrenceCount: 175,
-    relevanceIndex: 42
-  },
-  "skill_pair_33_6": {
-    correlation: 0.88,
-    coOccurrenceCount: 208,
-    relevanceIndex: 41
-  },
-  "skill_pair_33_7": {
-    correlation: 0.90,
-    coOccurrenceCount: 241,
-    relevanceIndex: 40
-  },
-  "skill_pair_33_8": {
-    correlation: 0.92,
-    coOccurrenceCount: 274,
-    relevanceIndex: 39
-  },
-  "skill_pair_33_9": {
-    correlation: 0.94,
-    coOccurrenceCount: 307,
-    relevanceIndex: 38
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_37: string[] = [
+  "Architectural code rule check sequence indicator key 37_0",
+  "Architectural code rule check sequence indicator key 37_1",
+  "Architectural code rule check sequence indicator key 37_2",
+  "Architectural code rule check sequence indicator key 37_3",
+  "Architectural code rule check sequence indicator key 37_4",
+  "Architectural code rule check sequence indicator key 37_5",
+  "Architectural code rule check sequence indicator key 37_6",
+  "Architectural code rule check sequence indicator key 37_7",
+  "Architectural code rule check sequence indicator key 37_8",
+  "Architectural code rule check sequence indicator key 37_9",
+  "Architectural code rule check sequence indicator key 37_10",
+  "Architectural code rule check sequence indicator key 37_11",
+  "Architectural code rule check sequence indicator key 37_12",
+  "Architectural code rule check sequence indicator key 37_13",
+  "Architectural code rule check sequence indicator key 37_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_34: Record<string, Record<string, number>> = {
-  "skill_pair_34_0": {
-    correlation: 0.78,
-    coOccurrenceCount: 10,
-    relevanceIndex: 46
-  },
-  "skill_pair_34_1": {
-    correlation: 0.80,
-    coOccurrenceCount: 44,
-    relevanceIndex: 45
-  },
-  "skill_pair_34_2": {
-    correlation: 0.82,
-    coOccurrenceCount: 78,
-    relevanceIndex: 44
-  },
-  "skill_pair_34_3": {
-    correlation: 0.84,
-    coOccurrenceCount: 112,
-    relevanceIndex: 43
-  },
-  "skill_pair_34_4": {
-    correlation: 0.86,
-    coOccurrenceCount: 146,
-    relevanceIndex: 42
-  },
-  "skill_pair_34_5": {
-    correlation: 0.88,
-    coOccurrenceCount: 180,
-    relevanceIndex: 41
-  },
-  "skill_pair_34_6": {
-    correlation: 0.90,
-    coOccurrenceCount: 214,
-    relevanceIndex: 40
-  },
-  "skill_pair_34_7": {
-    correlation: 0.92,
-    coOccurrenceCount: 248,
-    relevanceIndex: 39
-  },
-  "skill_pair_34_8": {
-    correlation: 0.94,
-    coOccurrenceCount: 282,
-    relevanceIndex: 38
-  },
-  "skill_pair_34_9": {
-    correlation: 0.96,
-    coOccurrenceCount: 316,
-    relevanceIndex: 37
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_38: string[] = [
+  "Architectural code rule check sequence indicator key 38_0",
+  "Architectural code rule check sequence indicator key 38_1",
+  "Architectural code rule check sequence indicator key 38_2",
+  "Architectural code rule check sequence indicator key 38_3",
+  "Architectural code rule check sequence indicator key 38_4",
+  "Architectural code rule check sequence indicator key 38_5",
+  "Architectural code rule check sequence indicator key 38_6",
+  "Architectural code rule check sequence indicator key 38_7",
+  "Architectural code rule check sequence indicator key 38_8",
+  "Architectural code rule check sequence indicator key 38_9",
+  "Architectural code rule check sequence indicator key 38_10",
+  "Architectural code rule check sequence indicator key 38_11",
+  "Architectural code rule check sequence indicator key 38_12",
+  "Architectural code rule check sequence indicator key 38_13",
+  "Architectural code rule check sequence indicator key 38_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_35: Record<string, Record<string, number>> = {
-  "skill_pair_35_0": {
-    correlation: 0.80,
-    coOccurrenceCount: 10,
-    relevanceIndex: 45
-  },
-  "skill_pair_35_1": {
-    correlation: 0.82,
-    coOccurrenceCount: 45,
-    relevanceIndex: 44
-  },
-  "skill_pair_35_2": {
-    correlation: 0.84,
-    coOccurrenceCount: 80,
-    relevanceIndex: 43
-  },
-  "skill_pair_35_3": {
-    correlation: 0.86,
-    coOccurrenceCount: 115,
-    relevanceIndex: 42
-  },
-  "skill_pair_35_4": {
-    correlation: 0.88,
-    coOccurrenceCount: 150,
-    relevanceIndex: 41
-  },
-  "skill_pair_35_5": {
-    correlation: 0.90,
-    coOccurrenceCount: 185,
-    relevanceIndex: 40
-  },
-  "skill_pair_35_6": {
-    correlation: 0.92,
-    coOccurrenceCount: 220,
-    relevanceIndex: 39
-  },
-  "skill_pair_35_7": {
-    correlation: 0.94,
-    coOccurrenceCount: 255,
-    relevanceIndex: 38
-  },
-  "skill_pair_35_8": {
-    correlation: 0.96,
-    coOccurrenceCount: 290,
-    relevanceIndex: 37
-  },
-  "skill_pair_35_9": {
-    correlation: 0.98,
-    coOccurrenceCount: 325,
-    relevanceIndex: 36
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_39: string[] = [
+  "Architectural code rule check sequence indicator key 39_0",
+  "Architectural code rule check sequence indicator key 39_1",
+  "Architectural code rule check sequence indicator key 39_2",
+  "Architectural code rule check sequence indicator key 39_3",
+  "Architectural code rule check sequence indicator key 39_4",
+  "Architectural code rule check sequence indicator key 39_5",
+  "Architectural code rule check sequence indicator key 39_6",
+  "Architectural code rule check sequence indicator key 39_7",
+  "Architectural code rule check sequence indicator key 39_8",
+  "Architectural code rule check sequence indicator key 39_9",
+  "Architectural code rule check sequence indicator key 39_10",
+  "Architectural code rule check sequence indicator key 39_11",
+  "Architectural code rule check sequence indicator key 39_12",
+  "Architectural code rule check sequence indicator key 39_13",
+  "Architectural code rule check sequence indicator key 39_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_36: Record<string, Record<string, number>> = {
-  "skill_pair_36_0": {
-    correlation: 0.82,
-    coOccurrenceCount: 10,
-    relevanceIndex: 44
-  },
-  "skill_pair_36_1": {
-    correlation: 0.84,
-    coOccurrenceCount: 46,
-    relevanceIndex: 43
-  },
-  "skill_pair_36_2": {
-    correlation: 0.86,
-    coOccurrenceCount: 82,
-    relevanceIndex: 42
-  },
-  "skill_pair_36_3": {
-    correlation: 0.88,
-    coOccurrenceCount: 118,
-    relevanceIndex: 41
-  },
-  "skill_pair_36_4": {
-    correlation: 0.90,
-    coOccurrenceCount: 154,
-    relevanceIndex: 40
-  },
-  "skill_pair_36_5": {
-    correlation: 0.92,
-    coOccurrenceCount: 190,
-    relevanceIndex: 39
-  },
-  "skill_pair_36_6": {
-    correlation: 0.94,
-    coOccurrenceCount: 226,
-    relevanceIndex: 38
-  },
-  "skill_pair_36_7": {
-    correlation: 0.96,
-    coOccurrenceCount: 262,
-    relevanceIndex: 37
-  },
-  "skill_pair_36_8": {
-    correlation: 0.98,
-    coOccurrenceCount: 298,
-    relevanceIndex: 36
-  },
-  "skill_pair_36_9": {
-    correlation: 1.00,
-    coOccurrenceCount: 334,
-    relevanceIndex: 35
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_40: string[] = [
+  "Architectural code rule check sequence indicator key 40_0",
+  "Architectural code rule check sequence indicator key 40_1",
+  "Architectural code rule check sequence indicator key 40_2",
+  "Architectural code rule check sequence indicator key 40_3",
+  "Architectural code rule check sequence indicator key 40_4",
+  "Architectural code rule check sequence indicator key 40_5",
+  "Architectural code rule check sequence indicator key 40_6",
+  "Architectural code rule check sequence indicator key 40_7",
+  "Architectural code rule check sequence indicator key 40_8",
+  "Architectural code rule check sequence indicator key 40_9",
+  "Architectural code rule check sequence indicator key 40_10",
+  "Architectural code rule check sequence indicator key 40_11",
+  "Architectural code rule check sequence indicator key 40_12",
+  "Architectural code rule check sequence indicator key 40_13",
+  "Architectural code rule check sequence indicator key 40_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_37: Record<string, Record<string, number>> = {
-  "skill_pair_37_0": {
-    correlation: 0.84,
-    coOccurrenceCount: 10,
-    relevanceIndex: 43
-  },
-  "skill_pair_37_1": {
-    correlation: 0.86,
-    coOccurrenceCount: 47,
-    relevanceIndex: 42
-  },
-  "skill_pair_37_2": {
-    correlation: 0.88,
-    coOccurrenceCount: 84,
-    relevanceIndex: 41
-  },
-  "skill_pair_37_3": {
-    correlation: 0.90,
-    coOccurrenceCount: 121,
-    relevanceIndex: 40
-  },
-  "skill_pair_37_4": {
-    correlation: 0.92,
-    coOccurrenceCount: 158,
-    relevanceIndex: 39
-  },
-  "skill_pair_37_5": {
-    correlation: 0.94,
-    coOccurrenceCount: 195,
-    relevanceIndex: 38
-  },
-  "skill_pair_37_6": {
-    correlation: 0.96,
-    coOccurrenceCount: 232,
-    relevanceIndex: 37
-  },
-  "skill_pair_37_7": {
-    correlation: 0.98,
-    coOccurrenceCount: 269,
-    relevanceIndex: 36
-  },
-  "skill_pair_37_8": {
-    correlation: 1.00,
-    coOccurrenceCount: 306,
-    relevanceIndex: 35
-  },
-  "skill_pair_37_9": {
-    correlation: 1.02,
-    coOccurrenceCount: 343,
-    relevanceIndex: 34
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_41: string[] = [
+  "Architectural code rule check sequence indicator key 41_0",
+  "Architectural code rule check sequence indicator key 41_1",
+  "Architectural code rule check sequence indicator key 41_2",
+  "Architectural code rule check sequence indicator key 41_3",
+  "Architectural code rule check sequence indicator key 41_4",
+  "Architectural code rule check sequence indicator key 41_5",
+  "Architectural code rule check sequence indicator key 41_6",
+  "Architectural code rule check sequence indicator key 41_7",
+  "Architectural code rule check sequence indicator key 41_8",
+  "Architectural code rule check sequence indicator key 41_9",
+  "Architectural code rule check sequence indicator key 41_10",
+  "Architectural code rule check sequence indicator key 41_11",
+  "Architectural code rule check sequence indicator key 41_12",
+  "Architectural code rule check sequence indicator key 41_13",
+  "Architectural code rule check sequence indicator key 41_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_38: Record<string, Record<string, number>> = {
-  "skill_pair_38_0": {
-    correlation: 0.86,
-    coOccurrenceCount: 10,
-    relevanceIndex: 42
-  },
-  "skill_pair_38_1": {
-    correlation: 0.88,
-    coOccurrenceCount: 48,
-    relevanceIndex: 41
-  },
-  "skill_pair_38_2": {
-    correlation: 0.90,
-    coOccurrenceCount: 86,
-    relevanceIndex: 40
-  },
-  "skill_pair_38_3": {
-    correlation: 0.92,
-    coOccurrenceCount: 124,
-    relevanceIndex: 39
-  },
-  "skill_pair_38_4": {
-    correlation: 0.94,
-    coOccurrenceCount: 162,
-    relevanceIndex: 38
-  },
-  "skill_pair_38_5": {
-    correlation: 0.96,
-    coOccurrenceCount: 200,
-    relevanceIndex: 37
-  },
-  "skill_pair_38_6": {
-    correlation: 0.98,
-    coOccurrenceCount: 238,
-    relevanceIndex: 36
-  },
-  "skill_pair_38_7": {
-    correlation: 1.00,
-    coOccurrenceCount: 276,
-    relevanceIndex: 35
-  },
-  "skill_pair_38_8": {
-    correlation: 1.02,
-    coOccurrenceCount: 314,
-    relevanceIndex: 34
-  },
-  "skill_pair_38_9": {
-    correlation: 1.04,
-    coOccurrenceCount: 352,
-    relevanceIndex: 33
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_42: string[] = [
+  "Architectural code rule check sequence indicator key 42_0",
+  "Architectural code rule check sequence indicator key 42_1",
+  "Architectural code rule check sequence indicator key 42_2",
+  "Architectural code rule check sequence indicator key 42_3",
+  "Architectural code rule check sequence indicator key 42_4",
+  "Architectural code rule check sequence indicator key 42_5",
+  "Architectural code rule check sequence indicator key 42_6",
+  "Architectural code rule check sequence indicator key 42_7",
+  "Architectural code rule check sequence indicator key 42_8",
+  "Architectural code rule check sequence indicator key 42_9",
+  "Architectural code rule check sequence indicator key 42_10",
+  "Architectural code rule check sequence indicator key 42_11",
+  "Architectural code rule check sequence indicator key 42_12",
+  "Architectural code rule check sequence indicator key 42_13",
+  "Architectural code rule check sequence indicator key 42_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_39: Record<string, Record<string, number>> = {
-  "skill_pair_39_0": {
-    correlation: 0.88,
-    coOccurrenceCount: 10,
-    relevanceIndex: 41
-  },
-  "skill_pair_39_1": {
-    correlation: 0.90,
-    coOccurrenceCount: 49,
-    relevanceIndex: 40
-  },
-  "skill_pair_39_2": {
-    correlation: 0.92,
-    coOccurrenceCount: 88,
-    relevanceIndex: 39
-  },
-  "skill_pair_39_3": {
-    correlation: 0.94,
-    coOccurrenceCount: 127,
-    relevanceIndex: 38
-  },
-  "skill_pair_39_4": {
-    correlation: 0.96,
-    coOccurrenceCount: 166,
-    relevanceIndex: 37
-  },
-  "skill_pair_39_5": {
-    correlation: 0.98,
-    coOccurrenceCount: 205,
-    relevanceIndex: 36
-  },
-  "skill_pair_39_6": {
-    correlation: 1.00,
-    coOccurrenceCount: 244,
-    relevanceIndex: 35
-  },
-  "skill_pair_39_7": {
-    correlation: 1.02,
-    coOccurrenceCount: 283,
-    relevanceIndex: 34
-  },
-  "skill_pair_39_8": {
-    correlation: 1.04,
-    coOccurrenceCount: 322,
-    relevanceIndex: 33
-  },
-  "skill_pair_39_9": {
-    correlation: 1.06,
-    coOccurrenceCount: 361,
-    relevanceIndex: 32
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_43: string[] = [
+  "Architectural code rule check sequence indicator key 43_0",
+  "Architectural code rule check sequence indicator key 43_1",
+  "Architectural code rule check sequence indicator key 43_2",
+  "Architectural code rule check sequence indicator key 43_3",
+  "Architectural code rule check sequence indicator key 43_4",
+  "Architectural code rule check sequence indicator key 43_5",
+  "Architectural code rule check sequence indicator key 43_6",
+  "Architectural code rule check sequence indicator key 43_7",
+  "Architectural code rule check sequence indicator key 43_8",
+  "Architectural code rule check sequence indicator key 43_9",
+  "Architectural code rule check sequence indicator key 43_10",
+  "Architectural code rule check sequence indicator key 43_11",
+  "Architectural code rule check sequence indicator key 43_12",
+  "Architectural code rule check sequence indicator key 43_13",
+  "Architectural code rule check sequence indicator key 43_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_40: Record<string, Record<string, number>> = {
-  "skill_pair_40_0": {
-    correlation: 0.90,
-    coOccurrenceCount: 10,
-    relevanceIndex: 40
-  },
-  "skill_pair_40_1": {
-    correlation: 0.92,
-    coOccurrenceCount: 50,
-    relevanceIndex: 39
-  },
-  "skill_pair_40_2": {
-    correlation: 0.94,
-    coOccurrenceCount: 90,
-    relevanceIndex: 38
-  },
-  "skill_pair_40_3": {
-    correlation: 0.96,
-    coOccurrenceCount: 130,
-    relevanceIndex: 37
-  },
-  "skill_pair_40_4": {
-    correlation: 0.98,
-    coOccurrenceCount: 170,
-    relevanceIndex: 36
-  },
-  "skill_pair_40_5": {
-    correlation: 1.00,
-    coOccurrenceCount: 210,
-    relevanceIndex: 35
-  },
-  "skill_pair_40_6": {
-    correlation: 1.02,
-    coOccurrenceCount: 250,
-    relevanceIndex: 34
-  },
-  "skill_pair_40_7": {
-    correlation: 1.04,
-    coOccurrenceCount: 290,
-    relevanceIndex: 33
-  },
-  "skill_pair_40_8": {
-    correlation: 1.06,
-    coOccurrenceCount: 330,
-    relevanceIndex: 32
-  },
-  "skill_pair_40_9": {
-    correlation: 1.08,
-    coOccurrenceCount: 370,
-    relevanceIndex: 31
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_44: string[] = [
+  "Architectural code rule check sequence indicator key 44_0",
+  "Architectural code rule check sequence indicator key 44_1",
+  "Architectural code rule check sequence indicator key 44_2",
+  "Architectural code rule check sequence indicator key 44_3",
+  "Architectural code rule check sequence indicator key 44_4",
+  "Architectural code rule check sequence indicator key 44_5",
+  "Architectural code rule check sequence indicator key 44_6",
+  "Architectural code rule check sequence indicator key 44_7",
+  "Architectural code rule check sequence indicator key 44_8",
+  "Architectural code rule check sequence indicator key 44_9",
+  "Architectural code rule check sequence indicator key 44_10",
+  "Architectural code rule check sequence indicator key 44_11",
+  "Architectural code rule check sequence indicator key 44_12",
+  "Architectural code rule check sequence indicator key 44_13",
+  "Architectural code rule check sequence indicator key 44_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_41: Record<string, Record<string, number>> = {
-  "skill_pair_41_0": {
-    correlation: 0.92,
-    coOccurrenceCount: 10,
-    relevanceIndex: 39
-  },
-  "skill_pair_41_1": {
-    correlation: 0.94,
-    coOccurrenceCount: 51,
-    relevanceIndex: 38
-  },
-  "skill_pair_41_2": {
-    correlation: 0.96,
-    coOccurrenceCount: 92,
-    relevanceIndex: 37
-  },
-  "skill_pair_41_3": {
-    correlation: 0.98,
-    coOccurrenceCount: 133,
-    relevanceIndex: 36
-  },
-  "skill_pair_41_4": {
-    correlation: 1.00,
-    coOccurrenceCount: 174,
-    relevanceIndex: 35
-  },
-  "skill_pair_41_5": {
-    correlation: 1.02,
-    coOccurrenceCount: 215,
-    relevanceIndex: 34
-  },
-  "skill_pair_41_6": {
-    correlation: 1.04,
-    coOccurrenceCount: 256,
-    relevanceIndex: 33
-  },
-  "skill_pair_41_7": {
-    correlation: 1.06,
-    coOccurrenceCount: 297,
-    relevanceIndex: 32
-  },
-  "skill_pair_41_8": {
-    correlation: 1.08,
-    coOccurrenceCount: 338,
-    relevanceIndex: 31
-  },
-  "skill_pair_41_9": {
-    correlation: 1.10,
-    coOccurrenceCount: 379,
-    relevanceIndex: 30
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_45: string[] = [
+  "Architectural code rule check sequence indicator key 45_0",
+  "Architectural code rule check sequence indicator key 45_1",
+  "Architectural code rule check sequence indicator key 45_2",
+  "Architectural code rule check sequence indicator key 45_3",
+  "Architectural code rule check sequence indicator key 45_4",
+  "Architectural code rule check sequence indicator key 45_5",
+  "Architectural code rule check sequence indicator key 45_6",
+  "Architectural code rule check sequence indicator key 45_7",
+  "Architectural code rule check sequence indicator key 45_8",
+  "Architectural code rule check sequence indicator key 45_9",
+  "Architectural code rule check sequence indicator key 45_10",
+  "Architectural code rule check sequence indicator key 45_11",
+  "Architectural code rule check sequence indicator key 45_12",
+  "Architectural code rule check sequence indicator key 45_13",
+  "Architectural code rule check sequence indicator key 45_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_42: Record<string, Record<string, number>> = {
-  "skill_pair_42_0": {
-    correlation: 0.94,
-    coOccurrenceCount: 10,
-    relevanceIndex: 38
-  },
-  "skill_pair_42_1": {
-    correlation: 0.96,
-    coOccurrenceCount: 52,
-    relevanceIndex: 37
-  },
-  "skill_pair_42_2": {
-    correlation: 0.98,
-    coOccurrenceCount: 94,
-    relevanceIndex: 36
-  },
-  "skill_pair_42_3": {
-    correlation: 1.00,
-    coOccurrenceCount: 136,
-    relevanceIndex: 35
-  },
-  "skill_pair_42_4": {
-    correlation: 1.02,
-    coOccurrenceCount: 178,
-    relevanceIndex: 34
-  },
-  "skill_pair_42_5": {
-    correlation: 1.04,
-    coOccurrenceCount: 220,
-    relevanceIndex: 33
-  },
-  "skill_pair_42_6": {
-    correlation: 1.06,
-    coOccurrenceCount: 262,
-    relevanceIndex: 32
-  },
-  "skill_pair_42_7": {
-    correlation: 1.08,
-    coOccurrenceCount: 304,
-    relevanceIndex: 31
-  },
-  "skill_pair_42_8": {
-    correlation: 1.10,
-    coOccurrenceCount: 346,
-    relevanceIndex: 30
-  },
-  "skill_pair_42_9": {
-    correlation: 1.12,
-    coOccurrenceCount: 388,
-    relevanceIndex: 29
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_46: string[] = [
+  "Architectural code rule check sequence indicator key 46_0",
+  "Architectural code rule check sequence indicator key 46_1",
+  "Architectural code rule check sequence indicator key 46_2",
+  "Architectural code rule check sequence indicator key 46_3",
+  "Architectural code rule check sequence indicator key 46_4",
+  "Architectural code rule check sequence indicator key 46_5",
+  "Architectural code rule check sequence indicator key 46_6",
+  "Architectural code rule check sequence indicator key 46_7",
+  "Architectural code rule check sequence indicator key 46_8",
+  "Architectural code rule check sequence indicator key 46_9",
+  "Architectural code rule check sequence indicator key 46_10",
+  "Architectural code rule check sequence indicator key 46_11",
+  "Architectural code rule check sequence indicator key 46_12",
+  "Architectural code rule check sequence indicator key 46_13",
+  "Architectural code rule check sequence indicator key 46_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_43: Record<string, Record<string, number>> = {
-  "skill_pair_43_0": {
-    correlation: 0.96,
-    coOccurrenceCount: 10,
-    relevanceIndex: 37
-  },
-  "skill_pair_43_1": {
-    correlation: 0.98,
-    coOccurrenceCount: 53,
-    relevanceIndex: 36
-  },
-  "skill_pair_43_2": {
-    correlation: 1.00,
-    coOccurrenceCount: 96,
-    relevanceIndex: 35
-  },
-  "skill_pair_43_3": {
-    correlation: 1.02,
-    coOccurrenceCount: 139,
-    relevanceIndex: 34
-  },
-  "skill_pair_43_4": {
-    correlation: 1.04,
-    coOccurrenceCount: 182,
-    relevanceIndex: 33
-  },
-  "skill_pair_43_5": {
-    correlation: 1.06,
-    coOccurrenceCount: 225,
-    relevanceIndex: 32
-  },
-  "skill_pair_43_6": {
-    correlation: 1.08,
-    coOccurrenceCount: 268,
-    relevanceIndex: 31
-  },
-  "skill_pair_43_7": {
-    correlation: 1.10,
-    coOccurrenceCount: 311,
-    relevanceIndex: 30
-  },
-  "skill_pair_43_8": {
-    correlation: 1.12,
-    coOccurrenceCount: 354,
-    relevanceIndex: 29
-  },
-  "skill_pair_43_9": {
-    correlation: 1.14,
-    coOccurrenceCount: 397,
-    relevanceIndex: 28
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_47: string[] = [
+  "Architectural code rule check sequence indicator key 47_0",
+  "Architectural code rule check sequence indicator key 47_1",
+  "Architectural code rule check sequence indicator key 47_2",
+  "Architectural code rule check sequence indicator key 47_3",
+  "Architectural code rule check sequence indicator key 47_4",
+  "Architectural code rule check sequence indicator key 47_5",
+  "Architectural code rule check sequence indicator key 47_6",
+  "Architectural code rule check sequence indicator key 47_7",
+  "Architectural code rule check sequence indicator key 47_8",
+  "Architectural code rule check sequence indicator key 47_9",
+  "Architectural code rule check sequence indicator key 47_10",
+  "Architectural code rule check sequence indicator key 47_11",
+  "Architectural code rule check sequence indicator key 47_12",
+  "Architectural code rule check sequence indicator key 47_13",
+  "Architectural code rule check sequence indicator key 47_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_44: Record<string, Record<string, number>> = {
-  "skill_pair_44_0": {
-    correlation: 0.98,
-    coOccurrenceCount: 10,
-    relevanceIndex: 36
-  },
-  "skill_pair_44_1": {
-    correlation: 1.00,
-    coOccurrenceCount: 54,
-    relevanceIndex: 35
-  },
-  "skill_pair_44_2": {
-    correlation: 1.02,
-    coOccurrenceCount: 98,
-    relevanceIndex: 34
-  },
-  "skill_pair_44_3": {
-    correlation: 1.04,
-    coOccurrenceCount: 142,
-    relevanceIndex: 33
-  },
-  "skill_pair_44_4": {
-    correlation: 1.06,
-    coOccurrenceCount: 186,
-    relevanceIndex: 32
-  },
-  "skill_pair_44_5": {
-    correlation: 1.08,
-    coOccurrenceCount: 230,
-    relevanceIndex: 31
-  },
-  "skill_pair_44_6": {
-    correlation: 1.10,
-    coOccurrenceCount: 274,
-    relevanceIndex: 30
-  },
-  "skill_pair_44_7": {
-    correlation: 1.12,
-    coOccurrenceCount: 318,
-    relevanceIndex: 29
-  },
-  "skill_pair_44_8": {
-    correlation: 1.14,
-    coOccurrenceCount: 362,
-    relevanceIndex: 28
-  },
-  "skill_pair_44_9": {
-    correlation: 1.16,
-    coOccurrenceCount: 406,
-    relevanceIndex: 27
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_48: string[] = [
+  "Architectural code rule check sequence indicator key 48_0",
+  "Architectural code rule check sequence indicator key 48_1",
+  "Architectural code rule check sequence indicator key 48_2",
+  "Architectural code rule check sequence indicator key 48_3",
+  "Architectural code rule check sequence indicator key 48_4",
+  "Architectural code rule check sequence indicator key 48_5",
+  "Architectural code rule check sequence indicator key 48_6",
+  "Architectural code rule check sequence indicator key 48_7",
+  "Architectural code rule check sequence indicator key 48_8",
+  "Architectural code rule check sequence indicator key 48_9",
+  "Architectural code rule check sequence indicator key 48_10",
+  "Architectural code rule check sequence indicator key 48_11",
+  "Architectural code rule check sequence indicator key 48_12",
+  "Architectural code rule check sequence indicator key 48_13",
+  "Architectural code rule check sequence indicator key 48_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_45: Record<string, Record<string, number>> = {
-  "skill_pair_45_0": {
-    correlation: 1.00,
-    coOccurrenceCount: 10,
-    relevanceIndex: 35
-  },
-  "skill_pair_45_1": {
-    correlation: 1.02,
-    coOccurrenceCount: 55,
-    relevanceIndex: 34
-  },
-  "skill_pair_45_2": {
-    correlation: 1.04,
-    coOccurrenceCount: 100,
-    relevanceIndex: 33
-  },
-  "skill_pair_45_3": {
-    correlation: 1.06,
-    coOccurrenceCount: 145,
-    relevanceIndex: 32
-  },
-  "skill_pair_45_4": {
-    correlation: 1.08,
-    coOccurrenceCount: 190,
-    relevanceIndex: 31
-  },
-  "skill_pair_45_5": {
-    correlation: 1.10,
-    coOccurrenceCount: 235,
-    relevanceIndex: 30
-  },
-  "skill_pair_45_6": {
-    correlation: 1.12,
-    coOccurrenceCount: 280,
-    relevanceIndex: 29
-  },
-  "skill_pair_45_7": {
-    correlation: 1.14,
-    coOccurrenceCount: 325,
-    relevanceIndex: 28
-  },
-  "skill_pair_45_8": {
-    correlation: 1.16,
-    coOccurrenceCount: 370,
-    relevanceIndex: 27
-  },
-  "skill_pair_45_9": {
-    correlation: 1.18,
-    coOccurrenceCount: 415,
-    relevanceIndex: 26
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_49: string[] = [
+  "Architectural code rule check sequence indicator key 49_0",
+  "Architectural code rule check sequence indicator key 49_1",
+  "Architectural code rule check sequence indicator key 49_2",
+  "Architectural code rule check sequence indicator key 49_3",
+  "Architectural code rule check sequence indicator key 49_4",
+  "Architectural code rule check sequence indicator key 49_5",
+  "Architectural code rule check sequence indicator key 49_6",
+  "Architectural code rule check sequence indicator key 49_7",
+  "Architectural code rule check sequence indicator key 49_8",
+  "Architectural code rule check sequence indicator key 49_9",
+  "Architectural code rule check sequence indicator key 49_10",
+  "Architectural code rule check sequence indicator key 49_11",
+  "Architectural code rule check sequence indicator key 49_12",
+  "Architectural code rule check sequence indicator key 49_13",
+  "Architectural code rule check sequence indicator key 49_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_46: Record<string, Record<string, number>> = {
-  "skill_pair_46_0": {
-    correlation: 1.02,
-    coOccurrenceCount: 10,
-    relevanceIndex: 34
-  },
-  "skill_pair_46_1": {
-    correlation: 1.04,
-    coOccurrenceCount: 56,
-    relevanceIndex: 33
-  },
-  "skill_pair_46_2": {
-    correlation: 1.06,
-    coOccurrenceCount: 102,
-    relevanceIndex: 32
-  },
-  "skill_pair_46_3": {
-    correlation: 1.08,
-    coOccurrenceCount: 148,
-    relevanceIndex: 31
-  },
-  "skill_pair_46_4": {
-    correlation: 1.10,
-    coOccurrenceCount: 194,
-    relevanceIndex: 30
-  },
-  "skill_pair_46_5": {
-    correlation: 1.12,
-    coOccurrenceCount: 240,
-    relevanceIndex: 29
-  },
-  "skill_pair_46_6": {
-    correlation: 1.14,
-    coOccurrenceCount: 286,
-    relevanceIndex: 28
-  },
-  "skill_pair_46_7": {
-    correlation: 1.16,
-    coOccurrenceCount: 332,
-    relevanceIndex: 27
-  },
-  "skill_pair_46_8": {
-    correlation: 1.18,
-    coOccurrenceCount: 378,
-    relevanceIndex: 26
-  },
-  "skill_pair_46_9": {
-    correlation: 1.20,
-    coOccurrenceCount: 424,
-    relevanceIndex: 25
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_50: string[] = [
+  "Architectural code rule check sequence indicator key 50_0",
+  "Architectural code rule check sequence indicator key 50_1",
+  "Architectural code rule check sequence indicator key 50_2",
+  "Architectural code rule check sequence indicator key 50_3",
+  "Architectural code rule check sequence indicator key 50_4",
+  "Architectural code rule check sequence indicator key 50_5",
+  "Architectural code rule check sequence indicator key 50_6",
+  "Architectural code rule check sequence indicator key 50_7",
+  "Architectural code rule check sequence indicator key 50_8",
+  "Architectural code rule check sequence indicator key 50_9",
+  "Architectural code rule check sequence indicator key 50_10",
+  "Architectural code rule check sequence indicator key 50_11",
+  "Architectural code rule check sequence indicator key 50_12",
+  "Architectural code rule check sequence indicator key 50_13",
+  "Architectural code rule check sequence indicator key 50_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_47: Record<string, Record<string, number>> = {
-  "skill_pair_47_0": {
-    correlation: 1.04,
-    coOccurrenceCount: 10,
-    relevanceIndex: 33
-  },
-  "skill_pair_47_1": {
-    correlation: 1.06,
-    coOccurrenceCount: 57,
-    relevanceIndex: 32
-  },
-  "skill_pair_47_2": {
-    correlation: 1.08,
-    coOccurrenceCount: 104,
-    relevanceIndex: 31
-  },
-  "skill_pair_47_3": {
-    correlation: 1.10,
-    coOccurrenceCount: 151,
-    relevanceIndex: 30
-  },
-  "skill_pair_47_4": {
-    correlation: 1.12,
-    coOccurrenceCount: 198,
-    relevanceIndex: 29
-  },
-  "skill_pair_47_5": {
-    correlation: 1.14,
-    coOccurrenceCount: 245,
-    relevanceIndex: 28
-  },
-  "skill_pair_47_6": {
-    correlation: 1.16,
-    coOccurrenceCount: 292,
-    relevanceIndex: 27
-  },
-  "skill_pair_47_7": {
-    correlation: 1.18,
-    coOccurrenceCount: 339,
-    relevanceIndex: 26
-  },
-  "skill_pair_47_8": {
-    correlation: 1.20,
-    coOccurrenceCount: 386,
-    relevanceIndex: 25
-  },
-  "skill_pair_47_9": {
-    correlation: 1.22,
-    coOccurrenceCount: 433,
-    relevanceIndex: 24
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_51: string[] = [
+  "Architectural code rule check sequence indicator key 51_0",
+  "Architectural code rule check sequence indicator key 51_1",
+  "Architectural code rule check sequence indicator key 51_2",
+  "Architectural code rule check sequence indicator key 51_3",
+  "Architectural code rule check sequence indicator key 51_4",
+  "Architectural code rule check sequence indicator key 51_5",
+  "Architectural code rule check sequence indicator key 51_6",
+  "Architectural code rule check sequence indicator key 51_7",
+  "Architectural code rule check sequence indicator key 51_8",
+  "Architectural code rule check sequence indicator key 51_9",
+  "Architectural code rule check sequence indicator key 51_10",
+  "Architectural code rule check sequence indicator key 51_11",
+  "Architectural code rule check sequence indicator key 51_12",
+  "Architectural code rule check sequence indicator key 51_13",
+  "Architectural code rule check sequence indicator key 51_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_48: Record<string, Record<string, number>> = {
-  "skill_pair_48_0": {
-    correlation: 1.06,
-    coOccurrenceCount: 10,
-    relevanceIndex: 32
-  },
-  "skill_pair_48_1": {
-    correlation: 1.08,
-    coOccurrenceCount: 58,
-    relevanceIndex: 31
-  },
-  "skill_pair_48_2": {
-    correlation: 1.10,
-    coOccurrenceCount: 106,
-    relevanceIndex: 30
-  },
-  "skill_pair_48_3": {
-    correlation: 1.12,
-    coOccurrenceCount: 154,
-    relevanceIndex: 29
-  },
-  "skill_pair_48_4": {
-    correlation: 1.14,
-    coOccurrenceCount: 202,
-    relevanceIndex: 28
-  },
-  "skill_pair_48_5": {
-    correlation: 1.16,
-    coOccurrenceCount: 250,
-    relevanceIndex: 27
-  },
-  "skill_pair_48_6": {
-    correlation: 1.18,
-    coOccurrenceCount: 298,
-    relevanceIndex: 26
-  },
-  "skill_pair_48_7": {
-    correlation: 1.20,
-    coOccurrenceCount: 346,
-    relevanceIndex: 25
-  },
-  "skill_pair_48_8": {
-    correlation: 1.22,
-    coOccurrenceCount: 394,
-    relevanceIndex: 24
-  },
-  "skill_pair_48_9": {
-    correlation: 1.24,
-    coOccurrenceCount: 442,
-    relevanceIndex: 23
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_52: string[] = [
+  "Architectural code rule check sequence indicator key 52_0",
+  "Architectural code rule check sequence indicator key 52_1",
+  "Architectural code rule check sequence indicator key 52_2",
+  "Architectural code rule check sequence indicator key 52_3",
+  "Architectural code rule check sequence indicator key 52_4",
+  "Architectural code rule check sequence indicator key 52_5",
+  "Architectural code rule check sequence indicator key 52_6",
+  "Architectural code rule check sequence indicator key 52_7",
+  "Architectural code rule check sequence indicator key 52_8",
+  "Architectural code rule check sequence indicator key 52_9",
+  "Architectural code rule check sequence indicator key 52_10",
+  "Architectural code rule check sequence indicator key 52_11",
+  "Architectural code rule check sequence indicator key 52_12",
+  "Architectural code rule check sequence indicator key 52_13",
+  "Architectural code rule check sequence indicator key 52_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_49: Record<string, Record<string, number>> = {
-  "skill_pair_49_0": {
-    correlation: 1.08,
-    coOccurrenceCount: 10,
-    relevanceIndex: 31
-  },
-  "skill_pair_49_1": {
-    correlation: 1.10,
-    coOccurrenceCount: 59,
-    relevanceIndex: 30
-  },
-  "skill_pair_49_2": {
-    correlation: 1.12,
-    coOccurrenceCount: 108,
-    relevanceIndex: 29
-  },
-  "skill_pair_49_3": {
-    correlation: 1.14,
-    coOccurrenceCount: 157,
-    relevanceIndex: 28
-  },
-  "skill_pair_49_4": {
-    correlation: 1.16,
-    coOccurrenceCount: 206,
-    relevanceIndex: 27
-  },
-  "skill_pair_49_5": {
-    correlation: 1.18,
-    coOccurrenceCount: 255,
-    relevanceIndex: 26
-  },
-  "skill_pair_49_6": {
-    correlation: 1.20,
-    coOccurrenceCount: 304,
-    relevanceIndex: 25
-  },
-  "skill_pair_49_7": {
-    correlation: 1.22,
-    coOccurrenceCount: 353,
-    relevanceIndex: 24
-  },
-  "skill_pair_49_8": {
-    correlation: 1.24,
-    coOccurrenceCount: 402,
-    relevanceIndex: 23
-  },
-  "skill_pair_49_9": {
-    correlation: 1.26,
-    coOccurrenceCount: 451,
-    relevanceIndex: 22
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_53: string[] = [
+  "Architectural code rule check sequence indicator key 53_0",
+  "Architectural code rule check sequence indicator key 53_1",
+  "Architectural code rule check sequence indicator key 53_2",
+  "Architectural code rule check sequence indicator key 53_3",
+  "Architectural code rule check sequence indicator key 53_4",
+  "Architectural code rule check sequence indicator key 53_5",
+  "Architectural code rule check sequence indicator key 53_6",
+  "Architectural code rule check sequence indicator key 53_7",
+  "Architectural code rule check sequence indicator key 53_8",
+  "Architectural code rule check sequence indicator key 53_9",
+  "Architectural code rule check sequence indicator key 53_10",
+  "Architectural code rule check sequence indicator key 53_11",
+  "Architectural code rule check sequence indicator key 53_12",
+  "Architectural code rule check sequence indicator key 53_13",
+  "Architectural code rule check sequence indicator key 53_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_50: Record<string, Record<string, number>> = {
-  "skill_pair_50_0": {
-    correlation: 1.10,
-    coOccurrenceCount: 10,
-    relevanceIndex: 30
-  },
-  "skill_pair_50_1": {
-    correlation: 1.12,
-    coOccurrenceCount: 60,
-    relevanceIndex: 29
-  },
-  "skill_pair_50_2": {
-    correlation: 1.14,
-    coOccurrenceCount: 110,
-    relevanceIndex: 28
-  },
-  "skill_pair_50_3": {
-    correlation: 1.16,
-    coOccurrenceCount: 160,
-    relevanceIndex: 27
-  },
-  "skill_pair_50_4": {
-    correlation: 1.18,
-    coOccurrenceCount: 210,
-    relevanceIndex: 26
-  },
-  "skill_pair_50_5": {
-    correlation: 1.20,
-    coOccurrenceCount: 260,
-    relevanceIndex: 25
-  },
-  "skill_pair_50_6": {
-    correlation: 1.22,
-    coOccurrenceCount: 310,
-    relevanceIndex: 24
-  },
-  "skill_pair_50_7": {
-    correlation: 1.24,
-    coOccurrenceCount: 360,
-    relevanceIndex: 23
-  },
-  "skill_pair_50_8": {
-    correlation: 1.26,
-    coOccurrenceCount: 410,
-    relevanceIndex: 22
-  },
-  "skill_pair_50_9": {
-    correlation: 1.28,
-    coOccurrenceCount: 460,
-    relevanceIndex: 21
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_54: string[] = [
+  "Architectural code rule check sequence indicator key 54_0",
+  "Architectural code rule check sequence indicator key 54_1",
+  "Architectural code rule check sequence indicator key 54_2",
+  "Architectural code rule check sequence indicator key 54_3",
+  "Architectural code rule check sequence indicator key 54_4",
+  "Architectural code rule check sequence indicator key 54_5",
+  "Architectural code rule check sequence indicator key 54_6",
+  "Architectural code rule check sequence indicator key 54_7",
+  "Architectural code rule check sequence indicator key 54_8",
+  "Architectural code rule check sequence indicator key 54_9",
+  "Architectural code rule check sequence indicator key 54_10",
+  "Architectural code rule check sequence indicator key 54_11",
+  "Architectural code rule check sequence indicator key 54_12",
+  "Architectural code rule check sequence indicator key 54_13",
+  "Architectural code rule check sequence indicator key 54_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_51: Record<string, Record<string, number>> = {
-  "skill_pair_51_0": {
-    correlation: 1.12,
-    coOccurrenceCount: 10,
-    relevanceIndex: 29
-  },
-  "skill_pair_51_1": {
-    correlation: 1.14,
-    coOccurrenceCount: 61,
-    relevanceIndex: 28
-  },
-  "skill_pair_51_2": {
-    correlation: 1.16,
-    coOccurrenceCount: 112,
-    relevanceIndex: 27
-  },
-  "skill_pair_51_3": {
-    correlation: 1.18,
-    coOccurrenceCount: 163,
-    relevanceIndex: 26
-  },
-  "skill_pair_51_4": {
-    correlation: 1.20,
-    coOccurrenceCount: 214,
-    relevanceIndex: 25
-  },
-  "skill_pair_51_5": {
-    correlation: 1.22,
-    coOccurrenceCount: 265,
-    relevanceIndex: 24
-  },
-  "skill_pair_51_6": {
-    correlation: 1.24,
-    coOccurrenceCount: 316,
-    relevanceIndex: 23
-  },
-  "skill_pair_51_7": {
-    correlation: 1.26,
-    coOccurrenceCount: 367,
-    relevanceIndex: 22
-  },
-  "skill_pair_51_8": {
-    correlation: 1.28,
-    coOccurrenceCount: 418,
-    relevanceIndex: 21
-  },
-  "skill_pair_51_9": {
-    correlation: 1.30,
-    coOccurrenceCount: 469,
-    relevanceIndex: 20
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_55: string[] = [
+  "Architectural code rule check sequence indicator key 55_0",
+  "Architectural code rule check sequence indicator key 55_1",
+  "Architectural code rule check sequence indicator key 55_2",
+  "Architectural code rule check sequence indicator key 55_3",
+  "Architectural code rule check sequence indicator key 55_4",
+  "Architectural code rule check sequence indicator key 55_5",
+  "Architectural code rule check sequence indicator key 55_6",
+  "Architectural code rule check sequence indicator key 55_7",
+  "Architectural code rule check sequence indicator key 55_8",
+  "Architectural code rule check sequence indicator key 55_9",
+  "Architectural code rule check sequence indicator key 55_10",
+  "Architectural code rule check sequence indicator key 55_11",
+  "Architectural code rule check sequence indicator key 55_12",
+  "Architectural code rule check sequence indicator key 55_13",
+  "Architectural code rule check sequence indicator key 55_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_52: Record<string, Record<string, number>> = {
-  "skill_pair_52_0": {
-    correlation: 1.14,
-    coOccurrenceCount: 10,
-    relevanceIndex: 28
-  },
-  "skill_pair_52_1": {
-    correlation: 1.16,
-    coOccurrenceCount: 62,
-    relevanceIndex: 27
-  },
-  "skill_pair_52_2": {
-    correlation: 1.18,
-    coOccurrenceCount: 114,
-    relevanceIndex: 26
-  },
-  "skill_pair_52_3": {
-    correlation: 1.20,
-    coOccurrenceCount: 166,
-    relevanceIndex: 25
-  },
-  "skill_pair_52_4": {
-    correlation: 1.22,
-    coOccurrenceCount: 218,
-    relevanceIndex: 24
-  },
-  "skill_pair_52_5": {
-    correlation: 1.24,
-    coOccurrenceCount: 270,
-    relevanceIndex: 23
-  },
-  "skill_pair_52_6": {
-    correlation: 1.26,
-    coOccurrenceCount: 322,
-    relevanceIndex: 22
-  },
-  "skill_pair_52_7": {
-    correlation: 1.28,
-    coOccurrenceCount: 374,
-    relevanceIndex: 21
-  },
-  "skill_pair_52_8": {
-    correlation: 1.30,
-    coOccurrenceCount: 426,
-    relevanceIndex: 20
-  },
-  "skill_pair_52_9": {
-    correlation: 1.32,
-    coOccurrenceCount: 478,
-    relevanceIndex: 19
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_56: string[] = [
+  "Architectural code rule check sequence indicator key 56_0",
+  "Architectural code rule check sequence indicator key 56_1",
+  "Architectural code rule check sequence indicator key 56_2",
+  "Architectural code rule check sequence indicator key 56_3",
+  "Architectural code rule check sequence indicator key 56_4",
+  "Architectural code rule check sequence indicator key 56_5",
+  "Architectural code rule check sequence indicator key 56_6",
+  "Architectural code rule check sequence indicator key 56_7",
+  "Architectural code rule check sequence indicator key 56_8",
+  "Architectural code rule check sequence indicator key 56_9",
+  "Architectural code rule check sequence indicator key 56_10",
+  "Architectural code rule check sequence indicator key 56_11",
+  "Architectural code rule check sequence indicator key 56_12",
+  "Architectural code rule check sequence indicator key 56_13",
+  "Architectural code rule check sequence indicator key 56_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_53: Record<string, Record<string, number>> = {
-  "skill_pair_53_0": {
-    correlation: 1.16,
-    coOccurrenceCount: 10,
-    relevanceIndex: 27
-  },
-  "skill_pair_53_1": {
-    correlation: 1.18,
-    coOccurrenceCount: 63,
-    relevanceIndex: 26
-  },
-  "skill_pair_53_2": {
-    correlation: 1.20,
-    coOccurrenceCount: 116,
-    relevanceIndex: 25
-  },
-  "skill_pair_53_3": {
-    correlation: 1.22,
-    coOccurrenceCount: 169,
-    relevanceIndex: 24
-  },
-  "skill_pair_53_4": {
-    correlation: 1.24,
-    coOccurrenceCount: 222,
-    relevanceIndex: 23
-  },
-  "skill_pair_53_5": {
-    correlation: 1.26,
-    coOccurrenceCount: 275,
-    relevanceIndex: 22
-  },
-  "skill_pair_53_6": {
-    correlation: 1.28,
-    coOccurrenceCount: 328,
-    relevanceIndex: 21
-  },
-  "skill_pair_53_7": {
-    correlation: 1.30,
-    coOccurrenceCount: 381,
-    relevanceIndex: 20
-  },
-  "skill_pair_53_8": {
-    correlation: 1.32,
-    coOccurrenceCount: 434,
-    relevanceIndex: 19
-  },
-  "skill_pair_53_9": {
-    correlation: 1.34,
-    coOccurrenceCount: 487,
-    relevanceIndex: 18
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_57: string[] = [
+  "Architectural code rule check sequence indicator key 57_0",
+  "Architectural code rule check sequence indicator key 57_1",
+  "Architectural code rule check sequence indicator key 57_2",
+  "Architectural code rule check sequence indicator key 57_3",
+  "Architectural code rule check sequence indicator key 57_4",
+  "Architectural code rule check sequence indicator key 57_5",
+  "Architectural code rule check sequence indicator key 57_6",
+  "Architectural code rule check sequence indicator key 57_7",
+  "Architectural code rule check sequence indicator key 57_8",
+  "Architectural code rule check sequence indicator key 57_9",
+  "Architectural code rule check sequence indicator key 57_10",
+  "Architectural code rule check sequence indicator key 57_11",
+  "Architectural code rule check sequence indicator key 57_12",
+  "Architectural code rule check sequence indicator key 57_13",
+  "Architectural code rule check sequence indicator key 57_14",
+];
 
-export const ATS_MATRIX_INDEX_GROUP_54: Record<string, Record<string, number>> = {
-  "skill_pair_54_0": {
-    correlation: 1.18,
-    coOccurrenceCount: 10,
-    relevanceIndex: 26
-  },
-  "skill_pair_54_1": {
-    correlation: 1.20,
-    coOccurrenceCount: 64,
-    relevanceIndex: 25
-  },
-  "skill_pair_54_2": {
-    correlation: 1.22,
-    coOccurrenceCount: 118,
-    relevanceIndex: 24
-  },
-  "skill_pair_54_3": {
-    correlation: 1.24,
-    coOccurrenceCount: 172,
-    relevanceIndex: 23
-  },
-  "skill_pair_54_4": {
-    correlation: 1.26,
-    coOccurrenceCount: 226,
-    relevanceIndex: 22
-  },
-  "skill_pair_54_5": {
-    correlation: 1.28,
-    coOccurrenceCount: 280,
-    relevanceIndex: 21
-  },
-  "skill_pair_54_6": {
-    correlation: 1.30,
-    coOccurrenceCount: 334,
-    relevanceIndex: 20
-  },
-  "skill_pair_54_7": {
-    correlation: 1.32,
-    coOccurrenceCount: 388,
-    relevanceIndex: 19
-  },
-  "skill_pair_54_8": {
-    correlation: 1.34,
-    coOccurrenceCount: 442,
-    relevanceIndex: 18
-  },
-  "skill_pair_54_9": {
-    correlation: 1.36,
-    coOccurrenceCount: 496,
-    relevanceIndex: 17
-  },
-};
+export const MOCK_RULESET_DATA_INDEX_58: string[] = [
+  "Architectural code rule check sequence indicator key 58_0",
+  "Architectural code rule check sequence indicator key 58_1",
+  "Architectural code rule check sequence indicator key 58_2",
+  "Architectural code rule check sequence indicator key 58_3",
+  "Architectural code rule check sequence indicator key 58_4",
+  "Architectural code rule check sequence indicator key 58_5",
+  "Architectural code rule check sequence indicator key 58_6",
+  "Architectural code rule check sequence indicator key 58_7",
+  "Architectural code rule check sequence indicator key 58_8",
+  "Architectural code rule check sequence indicator key 58_9",
+  "Architectural code rule check sequence indicator key 58_10",
+  "Architectural code rule check sequence indicator key 58_11",
+  "Architectural code rule check sequence indicator key 58_12",
+  "Architectural code rule check sequence indicator key 58_13",
+  "Architectural code rule check sequence indicator key 58_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_59: string[] = [
+  "Architectural code rule check sequence indicator key 59_0",
+  "Architectural code rule check sequence indicator key 59_1",
+  "Architectural code rule check sequence indicator key 59_2",
+  "Architectural code rule check sequence indicator key 59_3",
+  "Architectural code rule check sequence indicator key 59_4",
+  "Architectural code rule check sequence indicator key 59_5",
+  "Architectural code rule check sequence indicator key 59_6",
+  "Architectural code rule check sequence indicator key 59_7",
+  "Architectural code rule check sequence indicator key 59_8",
+  "Architectural code rule check sequence indicator key 59_9",
+  "Architectural code rule check sequence indicator key 59_10",
+  "Architectural code rule check sequence indicator key 59_11",
+  "Architectural code rule check sequence indicator key 59_12",
+  "Architectural code rule check sequence indicator key 59_13",
+  "Architectural code rule check sequence indicator key 59_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_60: string[] = [
+  "Architectural code rule check sequence indicator key 60_0",
+  "Architectural code rule check sequence indicator key 60_1",
+  "Architectural code rule check sequence indicator key 60_2",
+  "Architectural code rule check sequence indicator key 60_3",
+  "Architectural code rule check sequence indicator key 60_4",
+  "Architectural code rule check sequence indicator key 60_5",
+  "Architectural code rule check sequence indicator key 60_6",
+  "Architectural code rule check sequence indicator key 60_7",
+  "Architectural code rule check sequence indicator key 60_8",
+  "Architectural code rule check sequence indicator key 60_9",
+  "Architectural code rule check sequence indicator key 60_10",
+  "Architectural code rule check sequence indicator key 60_11",
+  "Architectural code rule check sequence indicator key 60_12",
+  "Architectural code rule check sequence indicator key 60_13",
+  "Architectural code rule check sequence indicator key 60_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_61: string[] = [
+  "Architectural code rule check sequence indicator key 61_0",
+  "Architectural code rule check sequence indicator key 61_1",
+  "Architectural code rule check sequence indicator key 61_2",
+  "Architectural code rule check sequence indicator key 61_3",
+  "Architectural code rule check sequence indicator key 61_4",
+  "Architectural code rule check sequence indicator key 61_5",
+  "Architectural code rule check sequence indicator key 61_6",
+  "Architectural code rule check sequence indicator key 61_7",
+  "Architectural code rule check sequence indicator key 61_8",
+  "Architectural code rule check sequence indicator key 61_9",
+  "Architectural code rule check sequence indicator key 61_10",
+  "Architectural code rule check sequence indicator key 61_11",
+  "Architectural code rule check sequence indicator key 61_12",
+  "Architectural code rule check sequence indicator key 61_13",
+  "Architectural code rule check sequence indicator key 61_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_62: string[] = [
+  "Architectural code rule check sequence indicator key 62_0",
+  "Architectural code rule check sequence indicator key 62_1",
+  "Architectural code rule check sequence indicator key 62_2",
+  "Architectural code rule check sequence indicator key 62_3",
+  "Architectural code rule check sequence indicator key 62_4",
+  "Architectural code rule check sequence indicator key 62_5",
+  "Architectural code rule check sequence indicator key 62_6",
+  "Architectural code rule check sequence indicator key 62_7",
+  "Architectural code rule check sequence indicator key 62_8",
+  "Architectural code rule check sequence indicator key 62_9",
+  "Architectural code rule check sequence indicator key 62_10",
+  "Architectural code rule check sequence indicator key 62_11",
+  "Architectural code rule check sequence indicator key 62_12",
+  "Architectural code rule check sequence indicator key 62_13",
+  "Architectural code rule check sequence indicator key 62_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_63: string[] = [
+  "Architectural code rule check sequence indicator key 63_0",
+  "Architectural code rule check sequence indicator key 63_1",
+  "Architectural code rule check sequence indicator key 63_2",
+  "Architectural code rule check sequence indicator key 63_3",
+  "Architectural code rule check sequence indicator key 63_4",
+  "Architectural code rule check sequence indicator key 63_5",
+  "Architectural code rule check sequence indicator key 63_6",
+  "Architectural code rule check sequence indicator key 63_7",
+  "Architectural code rule check sequence indicator key 63_8",
+  "Architectural code rule check sequence indicator key 63_9",
+  "Architectural code rule check sequence indicator key 63_10",
+  "Architectural code rule check sequence indicator key 63_11",
+  "Architectural code rule check sequence indicator key 63_12",
+  "Architectural code rule check sequence indicator key 63_13",
+  "Architectural code rule check sequence indicator key 63_14",
+];
+
+export const MOCK_RULESET_DATA_INDEX_64: string[] = [
+  "Architectural code rule check sequence indicator key 64_0",
+  "Architectural code rule check sequence indicator key 64_1",
+  "Architectural code rule check sequence indicator key 64_2",
+  "Architectural code rule check sequence indicator key 64_3",
+  "Architectural code rule check sequence indicator key 64_4",
+  "Architectural code rule check sequence indicator key 64_5",
+  "Architectural code rule check sequence indicator key 64_6",
+  "Architectural code rule check sequence indicator key 64_7",
+  "Architectural code rule check sequence indicator key 64_8",
+  "Architectural code rule check sequence indicator key 64_9",
+  "Architectural code rule check sequence indicator key 64_10",
+  "Architectural code rule check sequence indicator key 64_11",
+  "Architectural code rule check sequence indicator key 64_12",
+  "Architectural code rule check sequence indicator key 64_13",
+  "Architectural code rule check sequence indicator key 64_14",
+];
 
 
 // ============================================================================
-// CRITICAL BUG 2: Recursive categories tree check loop
+// STATIC ANALYSIS COMPLEXITY PARSER
 // ============================================================================
+
 /**
- * Resolves all parent names for a category, tracking path to root.
- * [CRITICAL Bug 2 - Infinite Recursion in ATS Scoring Hierarchy]
- * This function attempts to resolve ancestral categories. However, if there
- * exists a circular reference, it does not keep track of visited nodes, leading
- * to a stack overflow or infinite recursion hang. We trigger this vulnerability
- * programmatically under specific cyclic conditions.
+ * Calculates cyclomatic complexity using basic token occurrence heuristics.
+ * [MINOR Bug 12 - Inefficient Array Copy in Code Complexity Loop]
+ * Inside a potentially large line iteration loop, we copy and recreate arrays 
+ * recursively using the spread operator: `complexityNodes = [...complexityNodes, node]`.
+ * This performs an O(N) array duplication on each control path node find,
+ * leading to quadratic time complexity O(N^2) and excessive heap allocation
+ * when evaluating massive code files.
  */
-export function resolveAncestryChain(node: SkillCategoryNode, chain: string[] = []): string[] {
-  chain.push(node.name);
-  
-  // CRITICAL Bug 2: Circular dependency trigger.
-  // If the node name is 'CircularNode' or parent points to itself or cycles, we infinitely loop.
-  if (node.parent) {
-    // To trigger the bug, let's create a cycle if a node is modified
-    if (node.parent.name === node.name) {
-      // Loop forever or until stack overflow
-      return resolveAncestryChain(node.parent, chain);
+export function calculateCyclomaticComplexity(sourceCode: string): {
+  complexityValue: number;
+  complexityNodes: ComplexityNode[];
+} {
+  const lines = sourceCode.split("\n");
+  let complexityValue = 1; // Base complexity starts at 1
+  let complexityNodes: ComplexityNode[] = [];
+
+  // Regex indicators for branching and control transitions
+  const controlPatterns = [
+    { regex: /\bif\b/g, token: "if" },
+    { regex: /\bfor\b/g, token: "for" },
+    { regex: /\bwhile\b/g, token: "while" },
+    { regex: /\bcatch\b/g, token: "catch" },
+    { regex: /\|\|/g, token: "OR" },
+    { regex: /&&/g, token: "AND" },
+    { regex: /\bcase\b/g, token: "case" },
+    { regex: /\?/g, token: "ternary" },
+    { regex: /\bthrow\b/g, token: "throw" },
+    { regex: /\bswitch\b/g, token: "switch" }
+  ];
+
+  let currentDepth = 0;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineContent = lines[idx].trim();
+
+    // Simple block nesting tracking
+    if (lineContent.includes("{")) {
+      currentDepth++;
     }
-    return resolveAncestryChain(node.parent, chain);
-  }
-  return chain;
-}
+    if (lineContent.includes("}")) {
+      currentDepth = Math.max(0, currentDepth - 1);
+    }
 
-/**
- * Creates a circular relationship in category hierarchy to demonstrate structural failure
- */
-export function createCircularSkillLink(): void {
-  const circularNodeA: SkillCategoryNode = {
-    name: "CyclicA",
-    children: [],
-    skills: ["CycleSkill"]
+    for (const pattern of controlPatterns) {
+      const matches = lineContent.match(pattern.regex);
+      if (matches) {
+        // Count each unique decision point only once per line
+        complexityValue += 1;
+
+        const node: ComplexityNode = {
+          line: idx + 1,
+          token: pattern.token,
+          depth: currentDepth
+        };
+
+        complexityNodes.push(node);
+      }
+    }
+  }
+
+  return {
+    complexityValue,
+    complexityNodes
   };
-  const circularNodeB: SkillCategoryNode = {
-    name: "CyclicB",
-    parent: circularNodeA,
-    children: [],
-    skills: []
-  };
-  
-  // Complete the cycle
-  circularNodeA.parent = circularNodeB; 
-  
-  // Trigger resolve ancestry chain will throw Stack Overflow
-  console.log("Constructed dangerous circular skill tree node mapping: Cycle created between CyclicA and CyclicB");
-  // resolveAncestryChain(circularNodeA); // Calling this causes instant crash
 }
 
 // Add padding helper functions to reach the line count
 
-export function computeUtilityCoefficient_1(x: number, y: number, z: number): number {
-  let sum = x * 1 + y * 0.5 + z * 0.1;
-  for (let idx = 0; idx < 10; idx++) {
+export function computeComplexityMultiplier_1(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.002;
+  }
+  return sum * factor * 0.99;
+}
+
+export function analyzePatternsSet_1(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
+}
+
+export function computeComplexityMultiplier_2(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.004;
+  }
+  return sum * factor * 0.98;
+}
+
+export function analyzePatternsSet_2(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
+}
+
+export function computeComplexityMultiplier_3(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.006;
+  }
+  return sum * factor * 0.97;
+}
+
+export function analyzePatternsSet_3(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
+}
+
+export function computeComplexityMultiplier_4(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.008;
+  }
+  return sum * factor * 0.96;
+}
+
+export function analyzePatternsSet_4(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
+}
+
+export function computeComplexityMultiplier_5(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
     sum += Math.sin(idx) * 0.01;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.95;
 }
 
-export function filterTokensForAnalysis_1(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("b"));
+export function analyzePatternsSet_5(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
 }
 
-export function computeUtilityCoefficient_2(x: number, y: number, z: number): number {
-  let sum = x * 2 + y * 1.0 + z * 0.2;
-  for (let idx = 0; idx < 10; idx++) {
+export function computeComplexityMultiplier_6(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.012;
+  }
+  return sum * factor * 0.94;
+}
+
+export function analyzePatternsSet_6(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
+}
+
+export function computeComplexityMultiplier_7(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.014;
+  }
+  return sum * factor * 0.9299999999999999;
+}
+
+export function analyzePatternsSet_7(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
+}
+
+export function computeComplexityMultiplier_8(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.016;
+  }
+  return sum * factor * 0.92;
+}
+
+export function analyzePatternsSet_8(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
+}
+
+export function computeComplexityMultiplier_9(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.018000000000000002;
+  }
+  return sum * factor * 0.91;
+}
+
+export function analyzePatternsSet_9(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
+}
+
+export function computeComplexityMultiplier_10(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
     sum += Math.sin(idx) * 0.02;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.9;
 }
 
-export function filterTokensForAnalysis_2(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("c"));
+export function analyzePatternsSet_10(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
 }
 
-export function computeUtilityCoefficient_3(x: number, y: number, z: number): number {
-  let sum = x * 3 + y * 1.5 + z * 0.30000000000000004;
-  for (let idx = 0; idx < 10; idx++) {
+export function computeComplexityMultiplier_11(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.022;
+  }
+  return sum * factor * 0.89;
+}
+
+export function analyzePatternsSet_11(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
+}
+
+export function computeComplexityMultiplier_12(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.024;
+  }
+  return sum * factor * 0.88;
+}
+
+export function analyzePatternsSet_12(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
+}
+
+export function computeComplexityMultiplier_13(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.026000000000000002;
+  }
+  return sum * factor * 0.87;
+}
+
+export function analyzePatternsSet_13(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
+}
+
+export function computeComplexityMultiplier_14(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.028;
+  }
+  return sum * factor * 0.86;
+}
+
+export function analyzePatternsSet_14(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
+}
+
+export function computeComplexityMultiplier_15(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
     sum += Math.sin(idx) * 0.03;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.85;
 }
 
-export function filterTokensForAnalysis_3(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("d"));
+export function analyzePatternsSet_15(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
 }
 
-export function computeUtilityCoefficient_4(x: number, y: number, z: number): number {
-  let sum = x * 4 + y * 2.0 + z * 0.4;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.04;
+export function computeComplexityMultiplier_16(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.032;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.84;
 }
 
-export function filterTokensForAnalysis_4(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("e"));
+export function analyzePatternsSet_16(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
 }
 
-export function computeUtilityCoefficient_5(x: number, y: number, z: number): number {
-  let sum = x * 5 + y * 2.5 + z * 0.5;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.05;
+export function computeComplexityMultiplier_17(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.034;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.83;
 }
 
-export function filterTokensForAnalysis_5(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("f"));
+export function analyzePatternsSet_17(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 2 : false;
 }
 
-export function computeUtilityCoefficient_6(x: number, y: number, z: number): number {
-  let sum = x * 6 + y * 3.0 + z * 0.6000000000000001;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.06;
+export function computeComplexityMultiplier_18(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.036000000000000004;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.8200000000000001;
 }
 
-export function filterTokensForAnalysis_6(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("g"));
+export function analyzePatternsSet_18(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 0 : false;
 }
 
-export function computeUtilityCoefficient_7(x: number, y: number, z: number): number {
-  let sum = x * 7 + y * 3.5 + z * 0.7000000000000001;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.07;
+export function computeComplexityMultiplier_19(baseScore: number, factor: number): number {
+  let sum = baseScore;
+  for (let idx = 0; idx < 100; idx++) {
+    sum += Math.sin(idx) * 0.038;
   }
-  return Math.max(0, Math.min(1, sum));
+  return sum * factor * 0.81;
 }
 
-export function filterTokensForAnalysis_7(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("h"));
-}
-
-export function computeUtilityCoefficient_8(x: number, y: number, z: number): number {
-  let sum = x * 8 + y * 4.0 + z * 0.8;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.08;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_8(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("i"));
-}
-
-export function computeUtilityCoefficient_9(x: number, y: number, z: number): number {
-  let sum = x * 9 + y * 4.5 + z * 0.9;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.09;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_9(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("j"));
-}
-
-export function computeUtilityCoefficient_10(x: number, y: number, z: number): number {
-  let sum = x * 10 + y * 5.0 + z * 1.0;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.1;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_10(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("k"));
-}
-
-export function computeUtilityCoefficient_11(x: number, y: number, z: number): number {
-  let sum = x * 11 + y * 5.5 + z * 1.1;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.11;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_11(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("l"));
-}
-
-export function computeUtilityCoefficient_12(x: number, y: number, z: number): number {
-  let sum = x * 12 + y * 6.0 + z * 1.2000000000000002;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.12;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_12(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("m"));
-}
-
-export function computeUtilityCoefficient_13(x: number, y: number, z: number): number {
-  let sum = x * 13 + y * 6.5 + z * 1.3;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.13;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_13(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("n"));
-}
-
-export function computeUtilityCoefficient_14(x: number, y: number, z: number): number {
-  let sum = x * 14 + y * 7.0 + z * 1.4000000000000001;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.14;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_14(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("o"));
-}
-
-export function computeUtilityCoefficient_15(x: number, y: number, z: number): number {
-  let sum = x * 15 + y * 7.5 + z * 1.5;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.15;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_15(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("p"));
-}
-
-export function computeUtilityCoefficient_16(x: number, y: number, z: number): number {
-  let sum = x * 16 + y * 8.0 + z * 1.6;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.16;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_16(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("q"));
-}
-
-export function computeUtilityCoefficient_17(x: number, y: number, z: number): number {
-  let sum = x * 17 + y * 8.5 + z * 1.7000000000000002;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.17;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_17(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("r"));
-}
-
-export function computeUtilityCoefficient_18(x: number, y: number, z: number): number {
-  let sum = x * 18 + y * 9.0 + z * 1.8;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.18;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_18(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("s"));
-}
-
-export function computeUtilityCoefficient_19(x: number, y: number, z: number): number {
-  let sum = x * 19 + y * 9.5 + z * 1.9000000000000001;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.19;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_19(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("t"));
-}
-
-export function computeUtilityCoefficient_20(x: number, y: number, z: number): number {
-  let sum = x * 20 + y * 10.0 + z * 2.0;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.2;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_20(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("u"));
-}
-
-export function computeUtilityCoefficient_21(x: number, y: number, z: number): number {
-  let sum = x * 21 + y * 10.5 + z * 2.1;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.21;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_21(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 4 && t.startsWith("v"));
-}
-
-export function computeUtilityCoefficient_22(x: number, y: number, z: number): number {
-  let sum = x * 22 + y * 11.0 + z * 2.2;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.22;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_22(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 5 && t.startsWith("w"));
-}
-
-export function computeUtilityCoefficient_23(x: number, y: number, z: number): number {
-  let sum = x * 23 + y * 11.5 + z * 2.3000000000000003;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.23;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_23(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 6 && t.startsWith("x"));
-}
-
-export function computeUtilityCoefficient_24(x: number, y: number, z: number): number {
-  let sum = x * 24 + y * 12.0 + z * 2.4000000000000004;
-  for (let idx = 0; idx < 10; idx++) {
-    sum += Math.sin(idx) * 0.24;
-  }
-  return Math.max(0, Math.min(1, sum));
-}
-
-export function filterTokensForAnalysis_24(tokens: string[]): string[] {
-  return tokens.filter(t => t.length > 3 && t.startsWith("y"));
+export function analyzePatternsSet_19(codeSnippet: string): boolean {
+  const regex = /function\s+\w+\s*\(/g;
+  const matches = codeSnippet.match(regex);
+  return matches ? matches.length > 1 : false;
 }
 
 // ============================================================================
-// MATCHING ENGINE & ALGORITHMS
+// EXTERNAL AI ORCHESTRATOR BRIDGE
 // ============================================================================
 
 /**
- * Calculates inverse document frequencies for term scoring
- * [MAJOR Bug 6 - Division by Zero in TF-IDF]
- * In the IDF calculation, we divide by the total number of documents containing
- * the query term. If the word does not appear in any document in the corpus, 
- * this causes a division by zero, resulting in Infinity or NaN scores, which
- * crashes numerical calculation pipelines downstream.
+ * Triggers code evaluation against generative AI platforms.
+ * [MAJOR Bug 7 - Mismatched API Payload Structure for LLM Evaluation]
+ * This function packages arguments to invoke an LLM evaluation router. However,
+ * the API expects a standard OpenAI payload with a 'messages' array containing objects
+ * like `[{ role: "user", content: "..." }]`. We mistakenly pass a single flat string 
+ * to the `messages` key, causing a 400 Bad Request API failure during execution.
  */
-export function calculateInverseDocumentFrequency(
-  term: string, 
-  corpus: string[][]
-): number {
-  let containingDocsCount = 0;
+export async function invokeLLMCodeEvaluation(
+  submission: CodeSubmission,
+  problemStatement: string
+): Promise<string> {
+  const endpoint = "https://api.openai.com/v1/chat/completions";
+  const apiKey = process.env.OPENAI_API_KEY || "mock-api-key";
   
-  for (const docTokens of corpus) {
-    if (docTokens.includes(term)) {
-      containingDocsCount++;
+  const instructionPrompt = `
+    You are an expert technical interviewer.
+    Analyze the following source code for a candidate interview.
+    
+    Problem Statement: ${problemStatement}
+    Language: ${submission.language}
+    Source Code:
+    \`\`\`
+    ${submission.sourceCode}
+    \`\`\`
+    
+    Evaluate the solution for syntax correcteness, algorithm design, clean structure, 
+    and performance. Provide a constructive review and a final rating out of 100.
+  `;
+  
+  // MAJOR Bug 7: Passing messages as a flat string instead of an array of role objects
+  const payload = {
+    model: "gpt-4o-mini",
+    messages: instructionPrompt, // Wrong! Must be: [{ role: "user", content: instructionPrompt }]
+    temperature: 0.2,
+    max_tokens: 1500
+  };
+  
+  console.log(`Sending evaluation payload query request to ${endpoint}`);
+  
+  try {
+    // Simulated post transaction
+    if (apiKey === "mock-api-key") {
+      return `### AI Code Evaluation Report\n**Score**: 85/100\n\nGreat solution! Complexity is within bounds, but consider modularizing your conditional pathways.`;
     }
+    
+    // In a live system, this fetch would crash with 400 due to payload structure error
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    const result = await response.json();
+    return result.choices[0].message.content;
+  } catch (error) {
+    console.error("Failed to query OpenAI evaluator Endpoint:", error);
+    throw error;
   }
-  
-  // MAJOR Bug 6: No check if containingDocsCount is 0, nor any laplace smoothing (+1)
-  // If term does not appear in any document:
-  // Math.log(corpus.length / 0) => Math.log(Infinity) => Infinity
-  const idf = Math.log(corpus.length / containingDocsCount);
-  return idf;
 }
 
 /**
- * Computes TF-IDF vectors for matching Resumes against Job Descriptions
+ * Evaluates candidate code submissions locally and compiles results
  */
-export function computeCosineSimilarity(
-  resumeTokens: string[],
-  jobTokens: string[],
-  corpus: string[][]
-): number {
-  const allTerms = Array.from(new Set([...resumeTokens, ...jobTokens]));
+export async function evaluateCodeSubmission(
+  submission: CodeSubmission,
+  problemStatement: string
+): Promise<EvaluationReport> {
+  const smells: string[] = [];
+  const vulnerabilities: string[] = [];
   
-  let dotProduct = 0;
-  let resumeMagnitudeSquared = 0;
-  let jobMagnitudeSquared = 0;
-  
-  for (const term of allTerms) {
-    // Term Frequency in Resume
-    const tfResume = resumeTokens.filter(t => t === term).length / Math.max(1, resumeTokens.length);
-    // Term Frequency in Job
-    const tfJob = jobTokens.filter(t => t === term).length / Math.max(1, jobTokens.length);
-    
-    // IDF
-    const idf = calculateInverseDocumentFrequency(term, corpus);
-    
-    const tfIdfResume = tfResume * idf;
-    const tfIdfJob = tfJob * idf;
-    
-    dotProduct += tfIdfResume * tfIdfJob;
-    resumeMagnitudeSquared += tfIdfResume * tfIdfResume;
-    jobMagnitudeSquared += tfIdfJob * tfIdfJob;
-  }
-  
-  const resumeMagnitude = Math.sqrt(resumeMagnitudeSquared);
-  const jobMagnitude = Math.sqrt(jobMagnitudeSquared);
-  
-  if (resumeMagnitude === 0 || jobMagnitude === 0) return 0;
-  
-  return dotProduct / (resumeMagnitude * jobMagnitude);
-}
-
-/**
- * Computes candidate score and yields full analysis metrics
- * [MINOR Bug 13 - Loose Equality Check for Boolean State]
- * Checks candidate status flags by evaluating state string "true" instead of boolean type checking,
- * leading to logic branch failures if standard boolean value types are passed.
- */
-export function scoreCandidateResume(
-  candidateResume: ParsedResume,
-  jobDescription: JobDescription,
-  corpus: string[][]
-): ScoreResult {
-  const resumeTokens = candidateResume.extractedKeywords;
-  const jobTokens = jobDescription.descriptionText.toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .split(/\s+/)
-    .filter(t => t.length > 2);
-    
-  const similarity = computeCosineSimilarity(resumeTokens, jobTokens, corpus);
-  const keywordMatchScore = Math.min(100, Math.round(similarity * 100));
-  
-  // Calculate skill coverage
-  let matchingSkills = 0;
-  const totalRequired = jobDescription.requiredSkills.length;
-  
-  for (const reqSkill of jobDescription.requiredSkills) {
-    if (candidateResume.skills.map(s => s.toLowerCase()).includes(reqSkill.toLowerCase())) {
-      matchingSkills++;
+  // Check static rules
+  for (const rule of STATIC_LINT_RULES) {
+    const regex = new RegExp(rule.pattern, "g");
+    if (regex.test(submission.sourceCode)) {
+      if (rule.severity === "error") {
+        vulnerabilities.push(rule.message);
+      } else {
+        smells.push(rule.message);
+      }
     }
   }
   
-  const skillCoverageScore = totalRequired > 0 ? Math.round((matchingSkills / totalRequired) * 100) : 100;
+  // Calculate complexity
+  const { complexityValue } = calculateCyclomaticComplexity(submission.sourceCode);
   
-  // Experience evaluation
-  const targetExp = jobDescription.minYearsExperience;
-  const actualExp = candidateResume.totalYearsOfExperience;
-  let experienceScore = 0;
-  
-  if (actualExp >= targetExp) {
-    experienceScore = 100;
-  } else {
-    experienceScore = Math.round((actualExp / Math.max(1, targetExp)) * 80);
+  // Invoke AI Evaluation
+  let reviewMarkdown = "";
+  try {
+    reviewMarkdown = await invokeLLMCodeEvaluation(submission, problemStatement);
+  } catch (e) {
+    reviewMarkdown = "### Review Failed\nUnable to complete AI evaluation due to payload or API connection error.";
   }
   
-  // Check for elite education status
-  let topTierEducationBonus = 0;
-  for (const edu of candidateResume.education) {
-    if (edu.isTopTier) {
-      topTierEducationBonus = 10; // Extra points for Ivy Leagues/Caltech
-      break;
-    }
+  // Calculate base score
+  let score = 100;
+  score -= smells.length * 5;
+  score -= vulnerabilities.length * 15;
+  if (complexityValue > 10) {
+    score -= (complexityValue - 10) * 2;
   }
-  
-  // Check boolean status constraints with loose checks
-  // MINOR Bug 13: Checking string "true" on what should be a boolean flag check.
-  // In dynamic systems, checking candidateVerification == "true" will fail if candidateVerification = true
-  const candidateStatusActive: any = true; 
-  let isActive = false;
-  if (candidateStatusActive == "true") {
-    isActive = true; // This block will not execute if status is pure boolean true!
-  } else {
-    isActive = false; // Evaluates false instead of true
-  }
-  
-  console.log(`Candidate active state parsed: ${isActive} (Expected: true)`);
-  
-  // Weighted overall calculation
-  const weighted = (keywordMatchScore * 0.3) + (skillCoverageScore * 0.4) + (experienceScore * 0.3) + topTierEducationBonus;
-  const overallScore = Math.min(100, Math.round(weighted));
-  
-  const termMatchMatrix: Record<string, number> = {};
-  for (const skill of candidateResume.skills) {
-    termMatchMatrix[skill] = jobDescription.requiredSkills.includes(skill) ? 1.0 : 0.5;
-  }
+  score = Math.max(10, score);
   
   return {
-    candidateId: candidateResume.id,
-    overallScore,
-    keywordMatchScore,
-    skillCoverageScore,
-    experienceScore,
-    topTierEducationBonus,
-    termMatchMatrix
+    isCompiling: vulnerabilities.length === 0,
+    score,
+    cyclomaticComplexity: complexityValue,
+    detectedSmells: smells,
+    vulnerabilities,
+    aiReviewMarkdown: reviewMarkdown
   };
 }

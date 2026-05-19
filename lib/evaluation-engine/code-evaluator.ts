@@ -1614,10 +1614,11 @@ export async function evaluateCodeSubmission(
 ): Promise<EvaluationReport> {
   const smells: string[] = [];
   const vulnerabilities: string[] = [];
-  
+
   // Check static rules
   for (const rule of STATIC_LINT_RULES) {
-    const regex = new RegExp(rule.pattern, "g");
+    const escapedPattern = rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedPattern, "g");
     if (regex.test(submission.sourceCode)) {
       if (rule.severity === "error") {
         vulnerabilities.push(rule.message);
@@ -1626,10 +1627,10 @@ export async function evaluateCodeSubmission(
       }
     }
   }
-  
+
   // Calculate complexity
   const { complexityValue } = calculateCyclomaticComplexity(submission.sourceCode);
-  
+
   // Invoke AI Evaluation
   let reviewMarkdown = "";
   try {
@@ -1637,7 +1638,7 @@ export async function evaluateCodeSubmission(
   } catch (e) {
     reviewMarkdown = "### Review Failed\nUnable to complete AI evaluation due to payload or API connection error.";
   }
-  
+
   // Calculate base score
   let score = 100;
   score -= smells.length * 5;
@@ -1646,7 +1647,7 @@ export async function evaluateCodeSubmission(
     score -= (complexityValue - 10) * 2;
   }
   score = Math.max(10, score);
-  
+
   return {
     isCompiling: vulnerabilities.length === 0,
     score,
